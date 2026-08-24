@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>PawBook</title>
+<meta name="theme-color" content="#B5432E">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PawBook">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <header class="app-header">
+    <h1>🐾 PawBook</h1>
+  </header>
+
+  <nav class="dog-switcher" id="dogSwitcher"></nav>
+
+  <main>
+    <section class="screen active" id="screen-timeline"></section>
+    <section class="screen" id="screen-weight"></section>
+    <section class="screen" id="screen-profile"></section>
+  </main>
+
+  <button class="fab" id="fab" aria-label="Add entry">+</button>
+
+  <nav class="tab-bar">
+    <button class="tab-btn active" data-tab="timeline"><span class="icon">📖</span>Timeline</button>
+    <button class="tab-btn" data-tab="weight"><span class="icon">⚖️</span>Weight</button>
+    <button class="tab-btn" data-tab="profile"><span class="icon">🐕</span>Profile</button>
+  </nav>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- ===== Modal backdrop (shared) ===== -->
+  <div class="sheet-backdrop" id="sheetBackdrop"></div>
+
+  <!-- ===== Add / edit dog sheet ===== -->
+  <div class="sheet" id="dogSheet">
+    <div class="grabber"></div>
+    <h3 id="dogSheetTitle">Add a dog</h3>
+
+    <div class="field">
+      <label for="dogName">Name</label>
+      <input type="text" id="dogName" placeholder="e.g. Biscuit" maxlength="40">
+    </div>
+    <div class="field">
+      <label for="dogBreed">Breed</label>
+      <input type="text" id="dogBreed" placeholder="e.g. Cavoodle" maxlength="60">
+    </div>
+    <div class="field">
+      <label for="dogBirthday">Birthday (optional)</label>
+      <input type="date" id="dogBirthday">
+    </div>
+
+    <div class="sheet-actions">
+      <button class="btn btn-primary btn-block" id="saveDogBtn">Save</button>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-secondary btn-block sheet-close" style="margin-top:8px;">Cancel</button>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-block" id="dogSheetDelete" style="margin-top:8px; color:var(--rust); background:none;">Delete this dog</button>
+    </div>
+  </div>
+
+  <!-- ===== Add timeline entry sheet ===== -->
+  <div class="sheet" id="entrySheet" data-type="photo">
+    <div class="grabber"></div>
+    <h3>New entry</h3>
+
+    <div class="field">
+      <label>Type</label>
+      <div class="type-toggle">
+        <button type="button" class="selected" data-type="photo">Photo</button>
+        <button type="button" data-type="note">Note</button>
+        <button type="button" data-type="milestone">Milestone</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="entryDate">Date</label>
+      <input type="date" id="entryDate">
+    </div>
+
+    <div class="field">
+      <label>Photos</label>
+      <div class="photo-picker" id="photoPicker"></div>
+      <input type="file" id="photoInput" accept="image/*" multiple style="display:none;">
+    </div>
+
+    <div class="field">
+      <label for="entryCaption">Caption / note</label>
+      <textarea id="entryCaption" placeholder="What happened?"></textarea>
+    </div>
+
+    <div class="field">
+      <label for="entryTags">Tags (comma separated)</label>
+      <input type="text" id="entryTags" placeholder="e.g. beach, vet, funny">
+    </div>
+
+    <div class="sheet-actions">
+      <button class="btn btn-primary btn-block" id="saveEntryBtn">Add to timeline</button>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-secondary btn-block sheet-close" style="margin-top:8px;">Cancel</button>
+    </div>
+  </div>
+
+  <!-- ===== Log weight sheet ===== -->
+  <div class="sheet" id="weightSheet">
+    <div class="grabber"></div>
+    <h3>Log weight</h3>
+
+    <div class="field">
+      <label for="weightDate">Date</label>
+      <input type="date" id="weightDate">
+    </div>
+    <div class="field">
+      <label for="weightKg">Weight (kg)</label>
+      <input type="number" id="weightKg" inputmode="decimal" step="0.1" min="0" placeholder="e.g. 12.4">
+    </div>
+    <div class="field">
+      <label for="weightNote">Note (optional)</label>
+      <input type="text" id="weightNote" placeholder="e.g. after vet visit">
+    </div>
+
+    <div class="sheet-actions">
+      <button class="btn btn-primary btn-block" id="saveWeightBtn">Save weight</button>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-secondary btn-block sheet-close" style="margin-top:8px;">Cancel</button>
+    </div>
+  </div>
+
+  <script src="helpers.js"></script>
+  <script src="db.js"></script>
+  <script src="media.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
