@@ -7,12 +7,15 @@
   let currentDogId = localStorage.getItem('pawbook_currentDogId') || null;
   let activeTab = 'timeline';
   let pendingPhotos = []; // [{thumbBlob, fullBlob, previewUrl}] for the entry sheet in progress
+  let pendingEntryLocation = null; // {lat, lon} picked up from EXIF, for the single-entry add flow
+  let entryDateManuallyEdited = false; // true once the user types in #entryDate themselves
   let editingDogId = null; // set when the dog sheet is in "edit" mode
   let pendingDogPhoto = null; // {thumbBlob, fullBlob, previewUrl} — newly picked avatar, not yet saved
   let dogPhotoRemoved = false; // true when editing and the user cleared the existing avatar
   let timelineQuery = '';
   let timelineTypeFilter = 'all';
   let recapDogId = null; // which dog the open recap sheet is showing
+  let bulkImportGroups = []; // [{date, photoIds: [], previewUrls: [], location, skipped}] during a bulk import review
 
   // Session-lived cache of photoId -> thumbnail object URL, so repeated
   // renders (dog switcher, timeline, profile) don't keep creating fresh
@@ -54,6 +57,10 @@
   }
 
   function closeAllSheets() {
+    if ($('#bulkImportSheet').classList.contains('open')) {
+      cancelBulkImport();
+      return;
+    }
     $$('.sheet').forEach(closeSheet);
   }
 
@@ -302,6 +309,10 @@
     const isOverdueVaccination =
       entry.type === 'vaccination' && entry.nextDueDate && H.daysUntil(entry.nextDueDate, today) < 0;
 
+    const locationHtml = entry.location
+      ? `<a class="loc-badge" href="https://www.google.com/maps?q=${entry.location.lat},${entry.location.lon}" target="_blank" rel="noopener">📍</a>`
+      : '';
+
     const cardClasses = [
       'entry-card',
       entry.type === 'milestone' ? 'milestone' : '',
@@ -321,7 +332,7 @@
           ${entrySubtitleHtml(entry, today)}
           ${entry.caption ? `<p class="caption">${escapeHtml(entry.caption)}</p>` : ''}
           <div class="meta">
-            <span>${H.formatDateLong(entry.date)}</span>
+            <span>${H.formatDateLong(entry.date)} ${locationHtml}</span>
             <button class="fav-btn ${entry.favorite ? 'active' : ''}" data-id="${entry.id}">${entry.favorite ? '♥' : '♡'}</button>
           </div>
           ${tagsHtml}
@@ -698,6 +709,8 @@
     $('#vaccineNextDue').value = '';
     pendingPhotos.forEach((p) => URL.revokeObjectURL(p.previewUrl));
     pendingPhotos = [];
+    pendingEntryLocation = null;
+    entryDateManuallyEdited = false;
     renderPhotoPicker();
     $$('.type-toggle button').forEach((b) => b.classList.toggle('selected', b.dataset.type === 'photo'));
     $('#entrySheet').dataset.type = 'photo';
@@ -738,8 +751,21 @@
     showToast('Processing photo' + (files.length > 1 ? 's' : '') + '…');
     for (const file of files) {
       try {
-        const { thumbBlob, fullBlob } = await window.Media.processPhoto(file);
+        const [{ thumbBlob, fullBlob }, exif] = await Promise.all([
+          window.Media.processPhoto(file),
+          window.Exif.parseExifFromFile(file),
+        ]);
         pendingPhotos.push({ thumbBlob, fullBlob, previewUrl: objectUrlFor(thumbBlob) });
+
+        // Auto-fill the date from the photo's EXIF, but only if the user
+        // hasn't already typed a date themselves — never overwrite a manual edit.
+        if (exif.date && !entryDateManuallyEdited) {
+          $('#entryDate').value = exif.date;
+        }
+        // Take the first location we find across the picked photos.
+        if (exif.location && !pendingEntryLocation) {
+          pendingEntryLocation = exif.location;
+        }
       } catch (err) {
         console.error('Photo processing failed', err);
         showToast('Could not process that photo');
@@ -787,6 +813,9 @@
     }
 
     const entry = { dogId: currentDogId, date, type, caption, photoIds, tags };
+    if (type === 'photo' && pendingEntryLocation) {
+      entry.location = pendingEntryLocation;
+    }
     if (type === 'walk') {
       entry.distanceKm = distanceKm || undefined;
       entry.durationMin = durationMin || undefined;
@@ -799,6 +828,151 @@
 
     closeSheet($('#entrySheet'));
     showToast('Added to timeline');
+    if (activeTab === 'timeline') renderTimeline();
+  }
+
+  // ================= Bulk photo import =================
+
+  function resetBulkImportSheet() {
+    bulkImportGroups = [];
+    $('#bulkImportBody').classList.remove('hidden');
+    $('#bulkImportProgress').classList.add('hidden');
+    $('#bulkImportProgress').textContent = '';
+    $('#bulkImportGroups').innerHTML = '';
+    $('#bulkImportConfirmWrap').classList.add('hidden');
+  }
+
+  // Cleans up every photo already saved to IndexedDB for groups that are
+  // still pending (not yet imported), so an abandoned bulk import never
+  // leaves orphaned photo blobs behind.
+  async function cleanupPendingBulkPhotos() {
+    for (const group of bulkImportGroups) {
+      if (group.skipped) continue;
+      for (const id of group.photoIds) await Photos.remove(id);
+    }
+    bulkImportGroups = [];
+  }
+
+  async function cancelBulkImport() {
+    await cleanupPendingBulkPhotos();
+    closeSheet($('#bulkImportSheet'));
+  }
+
+  async function handleBulkPhotoSelection(fileList) {
+    const files = Array.from(fileList || []).filter((f) => f.type.startsWith('image/'));
+    if (!files.length) return;
+
+    $('#bulkImportBody').classList.add('hidden');
+    const progress = $('#bulkImportProgress');
+    progress.classList.remove('hidden');
+
+    // A flat list of processed photos before grouping — processed one at a
+    // time (not in parallel) to keep memory use bounded for large batches.
+    const processed = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      progress.textContent = `Processing photo ${i + 1} of ${files.length}…`;
+      try {
+        const [{ thumbBlob, fullBlob }, exif] = await Promise.all([
+          window.Media.processPhoto(file),
+          window.Exif.parseExifFromFile(file),
+        ]);
+        const rec = await Photos.add({ thumbBlob, fullBlob });
+        const date = exif.date || dateFromFileTimestamp(file);
+        processed.push({ photoId: rec.id, date, location: exif.location, previewUrl: objectUrlFor(thumbBlob) });
+      } catch (err) {
+        console.error('Bulk photo processing failed for', file.name, err);
+      }
+    }
+
+    progress.classList.add('hidden');
+
+    // Group by date.
+    const byDate = new Map();
+    for (const p of processed) {
+      if (!byDate.has(p.date)) byDate.set(p.date, { date: p.date, photoIds: [], previewUrls: [], location: null, skipped: false });
+      const group = byDate.get(p.date);
+      group.photoIds.push(p.photoId);
+      group.previewUrls.push(p.previewUrl);
+      if (!group.location && p.location) group.location = p.location;
+    }
+
+    bulkImportGroups = [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
+    renderBulkImportGroups();
+  }
+
+  // Photos without EXIF data fall back to the file's own last-modified
+  // timestamp — usually close to capture date, and always editable below
+  // before anything is actually imported.
+  function dateFromFileTimestamp(file) {
+    if (file.lastModified) return H.todayLocalStr(new Date(file.lastModified));
+    return H.todayLocalStr();
+  }
+
+  function renderBulkImportGroups() {
+    const wrap = $('#bulkImportGroups');
+    wrap.innerHTML = '';
+
+    if (!bulkImportGroups.length) {
+      wrap.innerHTML = emptyStateHtml('📷', 'No photos found', 'Try choosing photos again.');
+      $('#bulkImportConfirmWrap').classList.add('hidden');
+      return;
+    }
+
+    bulkImportGroups.forEach((group, i) => {
+      const row = document.createElement('div');
+      row.className = 'import-group' + (group.skipped ? ' skipped' : '');
+
+      const thumbsHtml =
+        group.previewUrls
+          .slice(0, 3)
+          .map((u) => `<img src="${u}" alt="">`)
+          .join('') + (group.previewUrls.length > 3 ? `<div class="more">+${group.previewUrls.length - 3}</div>` : '');
+
+      row.innerHTML = `
+        <div class="row-top">
+          <input type="date" value="${group.date}" ${group.skipped ? 'disabled' : ''}>
+          <button type="button" class="skip-btn">${group.skipped ? 'Include' : 'Skip'}</button>
+        </div>
+        <div class="thumbs">${thumbsHtml}</div>
+        <div style="font-size:12px; color:var(--ink-soft); margin-top:6px;">${group.photoIds.length} photo${group.photoIds.length === 1 ? '' : 's'}${group.location ? ' · 📍 has location' : ''}</div>
+      `;
+
+      row.querySelector('input[type="date"]').addEventListener('change', (e) => {
+        group.date = e.target.value || group.date;
+      });
+      row.querySelector('.skip-btn').addEventListener('click', () => {
+        group.skipped = !group.skipped;
+        renderBulkImportGroups();
+      });
+
+      wrap.appendChild(row);
+    });
+
+    const activeCount = bulkImportGroups.filter((g) => !g.skipped).length;
+    const confirmWrap = $('#bulkImportConfirmWrap');
+    confirmWrap.classList.toggle('hidden', activeCount === 0);
+    $('#confirmBulkImportBtn').textContent = `Import ${activeCount} ${activeCount === 1 ? 'entry' : 'entries'}`;
+  }
+
+  async function confirmBulkImport() {
+    const toImport = bulkImportGroups.filter((g) => !g.skipped);
+    const toDiscard = bulkImportGroups.filter((g) => g.skipped);
+
+    for (const group of toDiscard) {
+      for (const id of group.photoIds) await Photos.remove(id);
+    }
+
+    for (const group of toImport) {
+      const entry = { dogId: currentDogId, date: group.date, type: 'photo', caption: '', photoIds: group.photoIds, tags: [] };
+      if (group.location) entry.location = group.location;
+      await Entries.add(entry);
+    }
+
+    bulkImportGroups = [];
+    closeSheet($('#bulkImportSheet'));
+    showToast(`Imported ${toImport.length} ${toImport.length === 1 ? 'entry' : 'entries'}`);
     if (activeTab === 'timeline') renderTimeline();
   }
 
@@ -891,10 +1065,28 @@
       e.target.value = '';
     });
 
+    $('#entryDate').addEventListener('input', () => {
+      // Only real user typing fires 'input'; our own auto-fill sets .value
+      // directly, which does not — so this cleanly distinguishes the two.
+      entryDateManuallyEdited = true;
+    });
+
     $('#dogPhotoInput').addEventListener('change', (e) => {
       handleDogPhotoSelection(e.target.files);
       e.target.value = '';
     });
+
+    $('#openBulkImportBtn').addEventListener('click', () => {
+      resetBulkImportSheet();
+      openSheet($('#bulkImportSheet'));
+    });
+    $('#chooseBulkPhotosBtn').addEventListener('click', () => $('#bulkPhotoInput').click());
+    $('#bulkPhotoInput').addEventListener('change', (e) => {
+      handleBulkPhotoSelection(e.target.files);
+      e.target.value = '';
+    });
+    $('#confirmBulkImportBtn').addEventListener('click', confirmBulkImport);
+    $('#cancelBulkImportBtn').addEventListener('click', cancelBulkImport);
 
     $('#sheetBackdrop').addEventListener('click', closeAllSheets);
     $$('.sheet-close').forEach((btn) => btn.addEventListener('click', () => closeSheet(btn.closest('.sheet'))));

@@ -23,8 +23,9 @@
 
   <main>
     <section class="screen active" id="screen-timeline">
-      <div class="search-bar">
-        <input type="search" id="timelineSearch" placeholder="Search captions & tags">
+      <div class="search-bar" style="display:flex; gap:8px;">
+        <input type="search" id="timelineSearch" placeholder="Search captions & tags" style="flex:1;">
+        <button class="btn btn-secondary" id="openBulkImportBtn" style="white-space:nowrap; padding:10px 14px;">Import</button>
       </div>
       <div class="type-filter-row" id="typeFilterRow">
         <button class="filter-chip active" data-type="all">All</button>
@@ -175,6 +176,30 @@
     </div>
   </div>
 
+  <!-- ===== Bulk photo import sheet ===== -->
+  <div class="sheet" id="bulkImportSheet">
+    <div class="grabber"></div>
+    <h3>Import photos</h3>
+    <div id="bulkImportBody">
+      <p style="font-size:13.5px; color:var(--ink-soft); line-height:1.5; margin:0 0 14px;">
+        Pick a batch of photos and PawBook will read each one's capture date (and
+        location, if the photo has it) automatically, then group them into one
+        timeline entry per day. Review the dates below before importing — you
+        can adjust or skip any day.
+      </p>
+      <button class="btn btn-primary btn-block" id="chooseBulkPhotosBtn">Choose photos…</button>
+      <input type="file" id="bulkPhotoInput" accept="image/*" multiple style="display:none;">
+    </div>
+    <div id="bulkImportProgress" class="hidden" style="font-size:13px; color:var(--ink-soft); margin:14px 0;"></div>
+    <div id="bulkImportGroups"></div>
+    <div class="sheet-actions hidden" id="bulkImportConfirmWrap">
+      <button class="btn btn-primary btn-block" id="confirmBulkImportBtn">Import</button>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-secondary btn-block" id="cancelBulkImportBtn" style="margin-top:8px;">Cancel</button>
+    </div>
+  </div>
+
   <!-- ===== Year in review sheet ===== -->
   <div class="sheet" id="recapSheet">
     <div class="grabber"></div>
@@ -192,6 +217,7 @@
   <script src="helpers.js"></script>
   <script src="db.js"></script>
   <script src="media.js"></script>
+  <script src="exif.js"></script>
   <script src="backup.js"></script>
   <script src="app.js"></script>
 </body>

@@ -8,6 +8,16 @@ to your phone's home screen and works fully offline.
 - **Timeline** — log photos, notes, milestones, walks, vet visits, or
   vaccinations. Grouped by month, searchable, filterable by type, with an
   "On this day" callout for entries from past years.
+- **Auto date & location from photos** — when you add a photo, PawBook reads
+  its embedded capture date and (if present) GPS location automatically and
+  fills them in for you. You can still edit the date yourself — once you do,
+  it won't be overwritten. Location shows as a small 📍 on the entry that
+  opens the spot in Maps.
+- **Bulk import** — tap Import on the Timeline, pick a big batch of photos at
+  once, and PawBook reads each one's date and groups them into one entry per
+  day automatically. Review the dates (each is editable) and skip any day
+  you don't want, then import them all in one go. Built for exactly the
+  "I've had my dogs for years and have a lot to add" situation.
 - **Care reminders** — a banner surfaces any vaccination that's overdue or
   due within 30 days, based on the "next due date" you set when logging it.
   This is a passive, in-app reminder (checked whenever you open the app) —
@@ -18,14 +28,32 @@ to your phone's home screen and works fully offline.
 - **Profile** — name, breed, birthday (age shown automatically), a profile
   photo, walk stats (this week / all-time), a Health section for vet and
   vaccination history, and a "Year in review" recap.
-- **Year in review** — pick any year and see total entries, walks, weight
-  change, favorites, and milestones for that dog.
 - **Backup & restore** — export everything (dogs, entries, weights, photos)
   to a single JSON file you keep yourself, and restore it later. Since
   storage is local-only, this is the only way your data survives a lost or
   replaced phone. Re-importing the same backup is safe and never duplicates.
 - Supports multiple dogs, switchable from the top bar.
 - Installable as a home-screen app (PWA), fully usable offline.
+
+## About the photo date/location feature
+
+This reads standard EXIF metadata that cameras and phones embed in JPEG
+photos — no upload, no external service, entirely on-device. A few honest
+limits:
+
+- **Works on JPEGs.** iPhones shoot HEIC by default, but iOS Safari commonly
+  converts photos to JPEG when you share them out of the Photos app into a
+  web page like this one — so in practice this works for most photos picked
+  from your library. If a photo genuinely has no readable EXIF (HEIC that
+  wasn't converted, a screenshot, an edited/re-saved image with metadata
+  stripped), PawBook falls back to the photo file's own last-modified date,
+  which is usually close but not guaranteed exact — and it's always editable
+  before you save.
+- **Location only shows if the photo has it.** Many people have location
+  services off for their camera, or strip it before sharing — that's normal,
+  and those photos just won't show the 📍.
+- Nothing is sent anywhere to read this — it's just reading bytes already in
+  the file, entirely offline, the same as reading the caption you type.
 
 ## How it stores your data
 
@@ -36,14 +64,15 @@ capped-resolution version (full-screen view) rather than the original
 camera file, to stay fast and well under storage limits.
 
 **Because there's no sync, back up regularly** — especially before getting
-a new phone. The Backup tab handles this in one tap.
+a new phone, and especially after a big bulk import. The Backup tab handles
+this in one tap.
 
 ## Getting it onto your phone
 
 1. Create a new GitHub repo and upload all the files in this folder
    (`index.html`, `styles.css`, `app.js`, `db.js`, `helpers.js`, `media.js`,
-   `backup.js`, `manifest.json`, `service-worker.js`, and the `icons/`
-   folder).
+   `exif.js`, `backup.js`, `manifest.json`, `service-worker.js`, and the
+   `icons/` folder).
 2. In the repo's Settings → Pages, enable Pages from the main branch.
 3. Open the resulting URL on your iPhone in **Safari** (must be Safari, not
    Chrome, for "Add to Home Screen" to install a proper standalone app on
@@ -51,53 +80,57 @@ a new phone. The Backup tab handles this in one tap.
 4. Tap the Share icon → **Add to Home Screen**.
 5. Open it from the home screen icon from now on.
 
-If you already installed an earlier version, the update needs everyone's
-open tab/instance of the app to be **fully closed** (not just backgrounded)
-before the new version takes over — that's intentional, so an update never
-interrupts something mid-use. Replace the files in your host, then fully
-close and reopen the app.
+If you already installed an earlier version: replace the files in your
+host, then **fully close** every open instance of the app (not just
+background it) and reopen it — updates deliberately wait for a clean
+restart so they never interrupt something mid-use.
 
 Any static host (Netlify, Vercel, Cloudflare Pages, etc.) works the same
 way — it just needs to serve these files over HTTPS.
 
 ## What I verified vs. what needs your eyes
 
-**Actually tested, with real code execution — including one bug this
-caught:**
-- Every pure calculation (dates/timezones, ages, weight-chart math, care
-  reminder windows, search/filter, walk totals, year-in-review aggregation)
-  unit tested against hand-computed expected values, including edge cases
-  (year boundaries, flat/single-point charts, overdue-vs-soon reminders).
-- The full IndexedDB data layer run against a real IndexedDB implementation,
-  including multi-dog isolation and sort order.
-- The backup/restore pipeline run end-to-end — export, wipe the database
-  (simulating a new phone), restore, and confirm every field and every
-  photo's bytes come back byte-for-byte identical. Also confirmed
-  re-importing the same backup twice doesn't duplicate anything.
-- A full simulated-browser run through the actual app code (not a
-  reimplementation): added a dog, logged an overdue vaccination and a walk,
-  and confirmed the care banner, entry cards, search, type filters, profile
-  stats, and year-in-review sheet all rendered correctly from real data.
-  **This caught a real bug** — the database layer was silently dropping the
-  walk/vaccination-specific fields (distance, duration, next-due-date) on
-  save, because the original save function only knew about the original
-  five field names. Fixed and re-verified.
-- Also caught in review (not by a failing test, but by checking): the
-  service worker's offline file list was missing two of the app's own
-  script files since the first build, which would have broken offline use
-  after install. Fixed.
+**Actually tested, with real code execution:**
+- The EXIF parser (hand-written, no external library, so this got real
+  scrutiny) run against real JPEGs with known embedded date and GPS data,
+  generated with a Python EXIF-writing library — confirmed byte-exact date
+  and coordinate extraction, in both big-endian and little-endian byte
+  order (hand-built a little-endian test file specifically, since that
+  path wasn't exercised by the standard tool's output). Also tested against
+  photos with no EXIF, date-only EXIF, garbage/non-JPEG input, and a
+  truncated file — all handled without throwing.
+- The full bulk-import flow run through the real app code: photos with
+  different dates grouped correctly into separate entries, a no-EXIF photo
+  correctly fell back to its file timestamp, skipping a group during review
+  cleaned up its photos from storage, confirming created exactly the right
+  entries, and — importantly — cancelling a bulk import partway through
+  cleans up every already-processed photo rather than leaving orphans.
+- The single-entry flow's auto-fill behavior: confirmed a photo's EXIF date
+  fills the date field, and confirmed that once you've typed your own date,
+  a subsequently-added photo does *not* silently overwrite it.
+- Re-ran the full existing test suite (dates, ages, weight chart, care
+  reminders, search/filter, walk stats, year recap, the IndexedDB layer,
+  and backup/restore) to confirm none of this broke anything already
+  working.
+- Along the way, fixed a design flaw from earlier: entry fields were being
+  saved through a hand-maintained whitelist, which had already silently
+  dropped new fields once before. It's now save-everything-provided by
+  default, so adding `location` (and anything in the future) can't
+  reintroduce that bug.
 
 **Not tested — no real browser/phone here, so please check on your device:**
-- Actual look, feel, and layout on a real screen.
-- Install behavior and offline behavior after a real "Add to Home Screen."
-- The dog-profile photo picker's real-world feel (camera roll access, etc.)
-
-If anything looks off, tell me specifically what you tapped and what
-happened, and I'll fix it.
+- How a real bulk import feels with genuinely large batches (dozens to
+  hundreds of real phone photos) — processing time and memory behavior on
+  an actual device, not just the correctness of the logic.
+- Whether your specific photos (HEIC vs. JPEG, edited vs. original) carry
+  EXIF data the way this assumes.
 
 ## Known simplifications
 
 - No push notifications for care reminders — only shown when you open the
-  app (see "Care reminders" above for why).
+  app.
 - Weight input is kg-only; lb shown as a converted reference.
 - No search across dogs at once — search/filter is per-dog.
+- Bulk import groups strictly by calendar day; multiple entries can't be
+  split out of one day automatically (edit the date per group before
+  importing if you want a photo to land on its own).

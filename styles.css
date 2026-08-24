@@ -617,6 +617,62 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:fo
 }
 .backup-status.error { color: var(--rust); }
 
+/* ---------- Bulk import ---------- */
+
+.import-group {
+  background: var(--card);
+  border-radius: 14px;
+  padding: 12px;
+  margin-bottom: 10px;
+  box-shadow: var(--shadow);
+}
+.import-group .row-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.import-group input[type="date"] {
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--paper);
+}
+.import-group .skip-btn {
+  border: none;
+  background: none;
+  color: var(--rust);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 4px;
+}
+.import-group .thumbs { display: flex; gap: 4px; }
+.import-group .thumbs img {
+  width: 44px; height: 44px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+.import-group .thumbs .more {
+  width: 44px; height: 44px;
+  border-radius: 8px;
+  background: var(--paper);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+.import-group.skipped { opacity: 0.4; }
+
+/* ---------- Location badge ---------- */
+
+.loc-badge {
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-size: 13px;
+}
+
 /* ---------- Toast ---------- */
 
 .toast {

@@ -111,23 +111,21 @@ const DogsAPI = {
 
 const EntriesAPI = {
   async add(entry) {
+    // Spread first so any field the caller provides (dogId, date, type,
+    // distanceKm, durationMin, nextDueDate, location, etc.) is preserved
+    // automatically — then apply defaults/overrides on top. A hand-written
+    // field whitelist here previously caused a real bug where new fields
+    // were silently dropped on save; this shape can't repeat that.
     const record = {
+      ...entry,
       id: uuid(),
-      dogId: entry.dogId,
-      date: entry.date, // 'YYYY-MM-DD'
-      type: entry.type || 'photo', // 'photo' | 'note' | 'milestone' | 'walk' | 'vet' | 'vaccination'
+      type: entry.type || 'photo',
       caption: entry.caption || '',
       photoIds: entry.photoIds || [],
       tags: entry.tags || [],
       favorite: !!entry.favorite,
       createdAt: Date.now(),
     };
-    // Type-specific optional fields — only stored when actually provided,
-    // so entries of other types don't carry around empty walk/vaccination fields.
-    if (entry.distanceKm !== undefined) record.distanceKm = entry.distanceKm;
-    if (entry.durationMin !== undefined) record.durationMin = entry.durationMin;
-    if (entry.nextDueDate !== undefined) record.nextDueDate = entry.nextDueDate;
-
     const t = await tx(['entries'], 'readwrite');
     t.objectStore('entries').add(record);
     return record;
