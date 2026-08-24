@@ -115,13 +115,19 @@ const EntriesAPI = {
       id: uuid(),
       dogId: entry.dogId,
       date: entry.date, // 'YYYY-MM-DD'
-      type: entry.type || 'photo', // 'photo' | 'note' | 'milestone'
+      type: entry.type || 'photo', // 'photo' | 'note' | 'milestone' | 'walk' | 'vet' | 'vaccination'
       caption: entry.caption || '',
       photoIds: entry.photoIds || [],
       tags: entry.tags || [],
       favorite: !!entry.favorite,
       createdAt: Date.now(),
     };
+    // Type-specific optional fields — only stored when actually provided,
+    // so entries of other types don't carry around empty walk/vaccination fields.
+    if (entry.distanceKm !== undefined) record.distanceKm = entry.distanceKm;
+    if (entry.durationMin !== undefined) record.durationMin = entry.durationMin;
+    if (entry.nextDueDate !== undefined) record.nextDueDate = entry.nextDueDate;
+
     const t = await tx(['entries'], 'readwrite');
     t.objectStore('entries').add(record);
     return record;
@@ -168,6 +174,14 @@ const PhotosAPI = {
     const t = await tx(['photos'], 'readwrite');
     t.objectStore('photos').delete(id);
   },
+
+  // Used only by backup restore, which needs to preserve original ids so
+  // re-importing the same backup twice overwrites rather than duplicates.
+  async putRaw(record) {
+    const t = await tx(['photos'], 'readwrite');
+    t.objectStore('photos').put(record);
+    return record;
+  },
 };
 
 // ---- Weights ----
@@ -195,6 +209,13 @@ const WeightsAPI = {
   async remove(id) {
     const t = await tx(['weights'], 'readwrite');
     t.objectStore('weights').delete(id);
+  },
+
+  // Used only by backup restore — see PhotosAPI.putRaw for why.
+  async putRaw(record) {
+    const t = await tx(['weights'], 'readwrite');
+    t.objectStore('weights').put(record);
+    return record;
   },
 };
 

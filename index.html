@@ -22,9 +22,24 @@
   <nav class="dog-switcher" id="dogSwitcher"></nav>
 
   <main>
-    <section class="screen active" id="screen-timeline"></section>
+    <section class="screen active" id="screen-timeline">
+      <div class="search-bar">
+        <input type="search" id="timelineSearch" placeholder="Search captions & tags">
+      </div>
+      <div class="type-filter-row" id="typeFilterRow">
+        <button class="filter-chip active" data-type="all">All</button>
+        <button class="filter-chip" data-type="photo">Photos</button>
+        <button class="filter-chip" data-type="note">Notes</button>
+        <button class="filter-chip" data-type="milestone">Milestones</button>
+        <button class="filter-chip" data-type="walk">Walks</button>
+        <button class="filter-chip" data-type="vet">Vet</button>
+        <button class="filter-chip" data-type="vaccination">Vaccinations</button>
+      </div>
+      <div id="timelineContent"></div>
+    </section>
     <section class="screen" id="screen-weight"></section>
     <section class="screen" id="screen-profile"></section>
+    <section class="screen" id="screen-backup"></section>
   </main>
 
   <button class="fab" id="fab" aria-label="Add entry">+</button>
@@ -33,6 +48,7 @@
     <button class="tab-btn active" data-tab="timeline"><span class="icon">📖</span>Timeline</button>
     <button class="tab-btn" data-tab="weight"><span class="icon">⚖️</span>Weight</button>
     <button class="tab-btn" data-tab="profile"><span class="icon">🐕</span>Profile</button>
+    <button class="tab-btn" data-tab="backup"><span class="icon">💾</span>Backup</button>
   </nav>
 
   <div class="toast" id="toast"></div>
@@ -57,6 +73,11 @@
       <label for="dogBirthday">Birthday (optional)</label>
       <input type="date" id="dogBirthday">
     </div>
+    <div class="field">
+      <label>Photo</label>
+      <div class="photo-picker" id="dogAvatarPicker"></div>
+      <input type="file" id="dogPhotoInput" accept="image/*" style="display:none;">
+    </div>
 
     <div class="sheet-actions">
       <button class="btn btn-primary btn-block" id="saveDogBtn">Save</button>
@@ -77,9 +98,12 @@
     <div class="field">
       <label>Type</label>
       <div class="type-toggle">
-        <button type="button" class="selected" data-type="photo">Photo</button>
-        <button type="button" data-type="note">Note</button>
-        <button type="button" data-type="milestone">Milestone</button>
+        <button type="button" class="selected" data-type="photo">📷 Photo</button>
+        <button type="button" data-type="note">📝 Note</button>
+        <button type="button" data-type="milestone">⭐ Milestone</button>
+        <button type="button" data-type="walk">🐾 Walk</button>
+        <button type="button" data-type="vet">🩺 Vet visit</button>
+        <button type="button" data-type="vaccination">💉 Vaccination</button>
       </div>
     </div>
 
@@ -88,14 +112,27 @@
       <input type="date" id="entryDate">
     </div>
 
-    <div class="field">
+    <div class="field type-only" data-for-type="walk">
+      <label>Walk details</label>
+      <div style="display:flex; gap:10px;">
+        <input type="number" id="walkDistanceKm" inputmode="decimal" step="0.1" min="0" placeholder="Distance (km)">
+        <input type="number" id="walkDurationMin" inputmode="numeric" step="1" min="0" placeholder="Duration (min)">
+      </div>
+    </div>
+
+    <div class="field type-only" data-for-type="vaccination">
+      <label for="vaccineNextDue">Next due date</label>
+      <input type="date" id="vaccineNextDue">
+    </div>
+
+    <div class="field type-only" data-for-type="photo">
       <label>Photos</label>
       <div class="photo-picker" id="photoPicker"></div>
       <input type="file" id="photoInput" accept="image/*" multiple style="display:none;">
     </div>
 
     <div class="field">
-      <label for="entryCaption">Caption / note</label>
+      <label for="entryCaption" id="captionLabel">Caption / note</label>
       <textarea id="entryCaption" placeholder="What happened?"></textarea>
     </div>
 
@@ -138,9 +175,24 @@
     </div>
   </div>
 
+  <!-- ===== Year in review sheet ===== -->
+  <div class="sheet" id="recapSheet">
+    <div class="grabber"></div>
+    <h3>Year in review</h3>
+    <div class="field">
+      <label for="recapYearSelect">Year</label>
+      <select id="recapYearSelect"></select>
+    </div>
+    <div id="recapContent"></div>
+    <div class="sheet-actions">
+      <button class="btn btn-secondary btn-block sheet-close" style="margin-top:8px;">Close</button>
+    </div>
+  </div>
+
   <script src="helpers.js"></script>
   <script src="db.js"></script>
   <script src="media.js"></script>
+  <script src="backup.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

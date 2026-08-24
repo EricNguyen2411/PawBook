@@ -125,6 +125,92 @@ function buildWeightChartPoints(weights, width, height, padding = 24) {
   return { points, path, min, max };
 }
 
+// Whole days from todayStr to dateStr. Positive = future, negative = past.
+function daysUntil(dateStr, todayStr) {
+  const target = parseLocalDate(dateStr);
+  const today = parseLocalDate(todayStr);
+  return Math.round((target - today) / 86400000);
+}
+
+// Vaccination-type entries whose nextDueDate is overdue or within `windowDays`,
+// soonest/most-overdue first.
+function upcomingCareReminders(entries, todayStr, windowDays = 30) {
+  return entries
+    .filter((e) => e.type === 'vaccination' && e.nextDueDate)
+    .map((e) => ({ entry: e, daysUntil: daysUntil(e.nextDueDate, todayStr) }))
+    .filter((r) => r.daysUntil <= windowDays)
+    .sort((a, b) => a.daysUntil - b.daysUntil);
+}
+
+// Case-insensitive substring match against caption + tags, plus an optional
+// exact type filter ('all' or a specific entry type).
+function filterEntries(entries, { query, type } = {}) {
+  let result = entries;
+  if (type && type !== 'all') {
+    result = result.filter((e) => e.type === type);
+  }
+  const q = (query || '').trim().toLowerCase();
+  if (q) {
+    result = result.filter((e) => {
+      const haystack = [e.caption || '', ...(e.tags || [])].join(' ').toLowerCase();
+      return haystack.includes(q);
+    });
+  }
+  return result;
+}
+
+// Aggregate totals for 'walk' type entries, optionally restricted to entries
+// with date >= sinceDateStr (inclusive).
+function walkStats(entries, sinceDateStr) {
+  const walks = entries.filter((e) => e.type === 'walk' && (!sinceDateStr || e.date >= sinceDateStr));
+  const totalKm = walks.reduce((sum, w) => sum + (w.distanceKm || 0), 0);
+  const totalMin = walks.reduce((sum, w) => sum + (w.durationMin || 0), 0);
+  return { count: walks.length, totalKm, totalMin };
+}
+
+// Everything needed to render a "year in review" card for one dog.
+function buildYearRecap(entries, weights, year) {
+  const yearEntries = entries.filter((e) => parseLocalDate(e.date).getFullYear() === year);
+  const yearWeights = weights
+    .filter((w) => parseLocalDate(w.date).getFullYear() === year)
+    .sort((a, b) => (a.date > b.date ? 1 : -1));
+
+  const byType = {};
+  for (const e of yearEntries) byType[e.type] = (byType[e.type] || 0) + 1;
+
+  const favorites = yearEntries.filter((e) => e.favorite);
+  const milestones = yearEntries.filter((e) => e.type === 'milestone');
+  const walks = walkStats(yearEntries);
+
+  let weightChange = null;
+  if (yearWeights.length >= 2) {
+    weightChange = yearWeights[yearWeights.length - 1].weightKg - yearWeights[0].weightKg;
+  }
+
+  return {
+    year,
+    totalEntries: yearEntries.length,
+    byType,
+    favorites,
+    milestones,
+    walks,
+    weight: {
+      first: yearWeights[0] || null,
+      last: yearWeights[yearWeights.length - 1] || null,
+      change: weightChange,
+    },
+  };
+}
+
+// Distinct years present across entries + weights, newest first. Always
+// includes the current year so the recap picker has something to show.
+function yearsWithData(entries, weights, todayStr) {
+  const years = new Set([parseLocalDate(todayStr).getFullYear()]);
+  entries.forEach((e) => years.add(parseLocalDate(e.date).getFullYear()));
+  weights.forEach((w) => years.add(parseLocalDate(w.date).getFullYear()));
+  return [...years].sort((a, b) => b - a);
+}
+
 const api = {
   parseLocalDate,
   todayLocalStr,
@@ -137,6 +223,12 @@ const api = {
   kgToLb,
   lbToKg,
   buildWeightChartPoints,
+  daysUntil,
+  upcomingCareReminders,
+  filterEntries,
+  walkStats,
+  buildYearRecap,
+  yearsWithData,
 };
 
 if (typeof module !== 'undefined' && module.exports) {
