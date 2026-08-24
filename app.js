@@ -612,7 +612,7 @@
       dogPhotoRemoved = false;
     } catch (err) {
       console.error('Dog photo processing failed', err);
-      showToast('Could not process that photo');
+      showToast("Couldn't read that photo — try a different one");
       return;
     }
     renderDogAvatarPicker('');
@@ -768,7 +768,7 @@
         }
       } catch (err) {
         console.error('Photo processing failed', err);
-        showToast('Could not process that photo');
+        showToast("Couldn't read that photo — try a different one");
       }
     }
     renderPhotoPicker();

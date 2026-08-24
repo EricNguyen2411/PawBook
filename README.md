@@ -35,20 +35,31 @@ to your phone's home screen and works fully offline.
 - Supports multiple dogs, switchable from the top bar.
 - Installable as a home-screen app (PWA), fully usable offline.
 
+## About photo formats (HEIC)
+
+iPhones shoot HEIC by default. Safari can actually decode HEIC, but only
+through a specific API (`createImageBitmap`) — the more common approach of
+loading a photo into an `<img>` tag doesn't reliably work for HEIC in
+Safari even though the browser supports the format. PawBook uses the
+correct path, with an automatic fallback to the older approach for browsers
+that lack it, so photos straight from your camera roll should process
+normally without needing to change your camera's photo format settings.
+
 ## About the photo date/location feature
 
 This reads standard EXIF metadata that cameras and phones embed in JPEG
 photos — no upload, no external service, entirely on-device. A few honest
 limits:
 
-- **Works on JPEGs.** iPhones shoot HEIC by default, but iOS Safari commonly
-  converts photos to JPEG when you share them out of the Photos app into a
-  web page like this one — so in practice this works for most photos picked
-  from your library. If a photo genuinely has no readable EXIF (HEIC that
-  wasn't converted, a screenshot, an edited/re-saved image with metadata
-  stripped), PawBook falls back to the photo file's own last-modified date,
-  which is usually close but not guaranteed exact — and it's always editable
-  before you save.
+- **EXIF date/location specifically needs JPEG.** This is a separate thing
+  from the HEIC photo-decoding fix above — PawBook can now turn a HEIC photo
+  into a usable thumbnail either way, but the *metadata reader* only
+  understands the JPEG EXIF format. Practically, this mainly matters for
+  photos edited or re-saved in a way that strips metadata, or shared from
+  outside the Photos app. If a photo genuinely has no readable EXIF,
+  PawBook falls back to the photo file's own last-modified date, which is
+  usually close but not guaranteed exact — and it's always editable before
+  you save.
 - **Location only shows if the photo has it.** Many people have location
   services off for their camera, or strip it before sharing — that's normal,
   and those photos just won't show the 📍.
@@ -122,8 +133,13 @@ way — it just needs to serve these files over HTTPS.
 - How a real bulk import feels with genuinely large batches (dozens to
   hundreds of real phone photos) — processing time and memory behavior on
   an actual device, not just the correctness of the logic.
-- Whether your specific photos (HEIC vs. JPEG, edited vs. original) carry
-  EXIF data the way this assumes.
+- The HEIC decoding fix above (switching to `createImageBitmap`) is a
+  documented, well-supported fix for a known Safari limitation, and I
+  verified the surrounding resize math with real numbers — but I can't
+  actually run Safari or decode a real HEIC file here, so this is reasoned
+  from documentation rather than confirmed on-device. If photos still fail
+  to process after this update, tell me what phone/iOS version and whether
+  it's every photo or specific ones, and I'll dig further.
 
 ## Known simplifications
 
