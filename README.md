@@ -8,75 +8,69 @@ to your phone's home screen and works fully offline.
 - **Timeline** — log photos, notes, milestones, walks, vet visits, or
   vaccinations. Grouped by month, searchable, filterable by type, with an
   "On this day" callout for entries from past years.
+- **Edit & delete entries** — tap any entry to edit it (date, caption, tags,
+  photos, type-specific details) or delete it entirely. Deleting cleans up
+  its photos from storage too.
+- **Full-screen photo viewer** — tap any photo to see it at full resolution;
+  swipe between photos in the same entry, with the image tracking your
+  finger as you drag.
 - **Auto date & location from photos** — when you add a photo, PawBook reads
-  its embedded capture date and (if present) GPS location automatically and
-  fills them in for you. You can still edit the date yourself — once you do,
-  it won't be overwritten. Location shows as a small 📍 on the entry that
-  opens the spot in Maps.
+  its embedded capture date and (if present) GPS location automatically.
+  You can still edit the date yourself — once you do, it won't be
+  overwritten. Location shows as a small 📍 that opens the spot in Maps.
 - **Bulk import** — tap Import on the Timeline, pick a big batch of photos at
-  once, and PawBook reads each one's date and groups them into one entry per
-  day automatically. Review the dates (each is editable) and skip any day
-  you don't want, then import them all in one go. Built for exactly the
-  "I've had my dogs for years and have a lot to add" situation.
+  once, and PawBook groups them into one entry per day automatically, with
+  a review step before anything is saved.
+- **Tag browser** — on the Profile tab, every tag you've used shows as a
+  chip with a count; tap one to jump to the Timeline filtered to it.
+- **Stats dashboard** — a dedicated tab showing entries logged per month
+  (last 12 months), your longest daily logging streak, totals, and a
+  breakdown by entry type.
 - **Care reminders** — a banner surfaces any vaccination that's overdue or
-  due within 30 days, based on the "next due date" you set when logging it.
-  This is a passive, in-app reminder (checked whenever you open the app) —
-  not a push notification, since that would need a backend PawBook
+  due within 30 days. Passive and in-app only (checked when you open the
+  app) — not a push notification, since that needs a backend PawBook
   intentionally doesn't have.
+- **Puppy vaccination schedule suggestions** — for a dog under ~2 years old
+  with a birthday set, Profile offers a generic starting-point vaccination
+  schedule calculated from their birthday. It is explicitly labeled as not
+  veterinary advice, and every date is editable or skippable before
+  anything is added.
 - **Weight** — log weigh-ins in kg, see a trend chart, current weight, and
   all-time range.
 - **Profile** — name, breed, birthday (age shown automatically), a profile
-  photo, walk stats (this week / all-time), a Health section for vet and
-  vaccination history, and a "Year in review" recap.
-- **Backup & restore** — export everything (dogs, entries, weights, photos)
-  to a single JSON file you keep yourself, and restore it later. Since
-  storage is local-only, this is the only way your data survives a lost or
-  replaced phone. Re-importing the same backup is safe and never duplicates.
+  photo, walk stats, a Health section, tag browser, and a "Year in review"
+  recap.
+- **Dark mode** — System / Light / Dark, in the Backup tab. "System" follows
+  your OS setting live, including if you change it while the app is open.
+- **Backup & restore** — export everything to a single JSON file you keep
+  yourself, and restore it later. Since storage is local-only, this is the
+  only way your data survives a lost or replaced phone. Re-importing the
+  same backup never duplicates anything.
 - Supports multiple dogs, switchable from the top bar.
 - Installable as a home-screen app (PWA), fully usable offline.
 
-## About photo formats (HEIC)
+## About photo formats (HEIC) and the date/location feature
 
-iPhones shoot HEIC by default. Safari can actually decode HEIC, but only
-through a specific API (`createImageBitmap`) — the more common approach of
-loading a photo into an `<img>` tag doesn't reliably work for HEIC in
-Safari even though the browser supports the format. PawBook uses the
-correct path, with an automatic fallback to the older approach for browsers
-that lack it, so photos straight from your camera roll should process
-normally without needing to change your camera's photo format settings.
+iPhones shoot HEIC by default. Safari can decode HEIC, but only through a
+specific API (`createImageBitmap`) — PawBook uses that path, with a fallback
+for older browsers, so photos from your camera roll should process normally.
 
-## About the photo date/location feature
-
-This reads standard EXIF metadata that cameras and phones embed in JPEG
-photos — no upload, no external service, entirely on-device. A few honest
-limits:
-
-- **EXIF date/location specifically needs JPEG.** This is a separate thing
-  from the HEIC photo-decoding fix above — PawBook can now turn a HEIC photo
-  into a usable thumbnail either way, but the *metadata reader* only
-  understands the JPEG EXIF format. Practically, this mainly matters for
-  photos edited or re-saved in a way that strips metadata, or shared from
-  outside the Photos app. If a photo genuinely has no readable EXIF,
-  PawBook falls back to the photo file's own last-modified date, which is
-  usually close but not guaranteed exact — and it's always editable before
-  you save.
-- **Location only shows if the photo has it.** Many people have location
-  services off for their camera, or strip it before sharing — that's normal,
-  and those photos just won't show the 📍.
-- Nothing is sent anywhere to read this — it's just reading bytes already in
-  the file, entirely offline, the same as reading the caption you type.
+Separately, the EXIF *metadata* reader (date/GPS) only understands the JPEG
+format specifically — this is a different thing from the HEIC photo-decoding
+fix above. If a photo has no readable EXIF (HEIC that wasn't converted, a
+screenshot, a re-saved image with metadata stripped), PawBook falls back to
+the photo file's own last-modified date, and location just won't show.
+Nothing is sent anywhere to read this — it's on-device only.
 
 ## How it stores your data
 
-Everything lives **locally on your phone**, in the browser's IndexedDB —
-no server, no account, nothing leaves your device unless you tap Export.
-Photos are stored as a small thumbnail (grids/lists) plus a
-capped-resolution version (full-screen view) rather than the original
-camera file, to stay fast and well under storage limits.
+Everything lives **locally on your phone**, in the browser's IndexedDB — no
+server, no account, nothing leaves your device unless you tap Export. Photos
+are stored as a small thumbnail (grids/lists) plus a capped-resolution
+version (full-screen view), not the original camera file.
 
-**Because there's no sync, back up regularly** — especially before getting
-a new phone, and especially after a big bulk import. The Backup tab handles
-this in one tap.
+**Because there's no sync, back up regularly** — especially after a big
+bulk import. The Backup tab handles this in one tap.
 
 ## Getting it onto your phone
 
@@ -85,9 +79,8 @@ this in one tap.
    `exif.js`, `backup.js`, `manifest.json`, `service-worker.js`, and the
    `icons/` folder).
 2. In the repo's Settings → Pages, enable Pages from the main branch.
-3. Open the resulting URL on your iPhone in **Safari** (must be Safari, not
-   Chrome, for "Add to Home Screen" to install a proper standalone app on
-   iOS).
+3. Open the resulting URL on your iPhone in **Safari** (not Chrome — "Add to
+   Home Screen" needs Safari for a proper standalone install on iOS).
 4. Tap the Share icon → **Add to Home Screen**.
 5. Open it from the home screen icon from now on.
 
@@ -96,57 +89,43 @@ host, then **fully close** every open instance of the app (not just
 background it) and reopen it — updates deliberately wait for a clean
 restart so they never interrupt something mid-use.
 
-Any static host (Netlify, Vercel, Cloudflare Pages, etc.) works the same
-way — it just needs to serve these files over HTTPS.
-
 ## What I verified vs. what needs your eyes
 
 **Actually tested, with real code execution:**
-- The EXIF parser (hand-written, no external library, so this got real
-  scrutiny) run against real JPEGs with known embedded date and GPS data,
-  generated with a Python EXIF-writing library — confirmed byte-exact date
-  and coordinate extraction, in both big-endian and little-endian byte
-  order (hand-built a little-endian test file specifically, since that
-  path wasn't exercised by the standard tool's output). Also tested against
-  photos with no EXIF, date-only EXIF, garbage/non-JPEG input, and a
-  truncated file — all handled without throwing.
-- The full bulk-import flow run through the real app code: photos with
-  different dates grouped correctly into separate entries, a no-EXIF photo
-  correctly fell back to its file timestamp, skipping a group during review
-  cleaned up its photos from storage, confirming created exactly the right
-  entries, and — importantly — cancelling a bulk import partway through
-  cleans up every already-processed photo rather than leaving orphans.
-- The single-entry flow's auto-fill behavior: confirmed a photo's EXIF date
-  fills the date field, and confirmed that once you've typed your own date,
-  a subsequently-added photo does *not* silently overwrite it.
-- Re-ran the full existing test suite (dates, ages, weight chart, care
-  reminders, search/filter, walk stats, year recap, the IndexedDB layer,
-  and backup/restore) to confirm none of this broke anything already
-  working.
-- Along the way, fixed a design flaw from earlier: entry fields were being
-  saved through a hand-maintained whitelist, which had already silently
-  dropped new fields once before. It's now save-everything-provided by
-  default, so adding `location` (and anything in the future) can't
-  reintroduce that bug.
+- All new calculation logic (tag counting, monthly bucketing for the bar
+  chart, longest-streak calculation, vaccination schedule date math) unit
+  tested against hand-computed expected values, including edge cases (ties
+  in tag counts, duplicate-day entries in the streak calculation, a 12-month
+  window correctly excluding older entries).
+- A full simulated-browser run through the actual app code exercising every
+  new feature: added and then edited an entry (confirmed it updates in
+  place rather than duplicating), deleted an entry, opened the full-screen
+  photo viewer by tapping a photo (and confirmed that tap correctly does
+  *not* also trigger the edit sheet — a real risk given both handlers live
+  on overlapping elements), tapped a tag chip and confirmed it filters the
+  timeline correctly, rendered the stats dashboard and confirmed the
+  12-month bar chart, walked through the vaccination schedule sheet
+  (skipped one of four suggested items, confirmed the other three were
+  added with correct due dates and none more), and toggled dark mode and
+  confirmed both the visual state and the saved preference.
+- Re-checked ID references and confirmed no duplicate element IDs anywhere
+  across the now-larger set of sheets/screens.
 
 **Not tested — no real browser/phone here, so please check on your device:**
-- How a real bulk import feels with genuinely large batches (dozens to
-  hundreds of real phone photos) — processing time and memory behavior on
-  an actual device, not just the correctness of the logic.
-- The HEIC decoding fix above (switching to `createImageBitmap`) is a
-  documented, well-supported fix for a known Safari limitation, and I
-  verified the surrounding resize math with real numbers — but I can't
-  actually run Safari or decode a real HEIC file here, so this is reasoned
-  from documentation rather than confirmed on-device. If photos still fail
-  to process after this update, tell me what phone/iOS version and whether
-  it's every photo or specific ones, and I'll dig further.
+- The actual feel of the swipe gesture in the photo viewer — the logic is
+  tested, but real touch physics (velocity, momentum) only show up on a
+  real screen.
+- Dark mode's actual visual appearance and contrast on a real display.
+- Whether the puppy vaccination schedule's age cutoff (roughly under 2
+  years) matches when you'd actually find it useful — easy to adjust if not.
 
 ## Known simplifications
 
 - No push notifications for care reminders — only shown when you open the
   app.
 - Weight input is kg-only; lb shown as a converted reference.
-- No search across dogs at once — search/filter is per-dog.
-- Bulk import groups strictly by calendar day; multiple entries can't be
-  split out of one day automatically (edit the date per group before
-  importing if you want a photo to land on its own).
+- Search/filter and the tag browser are per-dog, not across all dogs.
+- Bulk import groups strictly by calendar day.
+- The puppy vaccination schedule is a generic template (4 commonly-cited
+  milestones), not tailored to breed, region, or vaccine brand — always
+  meant to be adjusted against your actual vet's plan, not followed as-is.

@@ -39,6 +39,7 @@
       <div id="timelineContent"></div>
     </section>
     <section class="screen" id="screen-weight"></section>
+    <section class="screen" id="screen-stats"></section>
     <section class="screen" id="screen-profile"></section>
     <section class="screen" id="screen-backup"></section>
   </main>
@@ -48,6 +49,7 @@
   <nav class="tab-bar">
     <button class="tab-btn active" data-tab="timeline"><span class="icon">📖</span>Timeline</button>
     <button class="tab-btn" data-tab="weight"><span class="icon">⚖️</span>Weight</button>
+    <button class="tab-btn" data-tab="stats"><span class="icon">📊</span>Stats</button>
     <button class="tab-btn" data-tab="profile"><span class="icon">🐕</span>Profile</button>
     <button class="tab-btn" data-tab="backup"><span class="icon">💾</span>Backup</button>
   </nav>
@@ -91,10 +93,10 @@
     </div>
   </div>
 
-  <!-- ===== Add timeline entry sheet ===== -->
+  <!-- ===== Add/edit timeline entry sheet ===== -->
   <div class="sheet" id="entrySheet" data-type="photo">
     <div class="grabber"></div>
-    <h3>New entry</h3>
+    <h3 id="entrySheetTitle">New entry</h3>
 
     <div class="field">
       <label>Type</label>
@@ -147,6 +149,9 @@
     </div>
     <div class="sheet-actions">
       <button class="btn btn-secondary btn-block sheet-close" style="margin-top:8px;">Cancel</button>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-block hidden" id="entrySheetDelete" style="margin-top:8px; color:var(--rust); background:none;">Delete entry</button>
     </div>
   </div>
 
@@ -212,6 +217,35 @@
     <div class="sheet-actions">
       <button class="btn btn-secondary btn-block sheet-close" style="margin-top:8px;">Close</button>
     </div>
+  </div>
+
+  <!-- ===== Puppy vaccination schedule sheet ===== -->
+  <div class="sheet" id="vaccineScheduleSheet">
+    <div class="grabber"></div>
+    <h3>Suggested vaccination schedule</h3>
+    <p style="font-size:13px; color:var(--ink-soft); line-height:1.5; margin:0 0 14px;">
+      A commonly-used general starting point, calculated from this dog's
+      birthday — <strong>not veterinary advice</strong>. Actual timing
+      depends on the vaccine brand and your vet's own schedule, so treat
+      these as editable reminders, not a plan to follow blindly. Adjust or
+      remove any that don't match what your vet recommends.
+    </p>
+    <div id="vaccineScheduleRows"></div>
+    <div class="sheet-actions">
+      <button class="btn btn-primary btn-block" id="confirmVaccineScheduleBtn">Add these as reminders</button>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-secondary btn-block sheet-close" style="margin-top:8px;">Cancel</button>
+    </div>
+  </div>
+
+  <!-- ===== Full-screen photo viewer ===== -->
+  <div class="photo-viewer" id="photoViewer">
+    <button class="pv-close" id="pvCloseBtn" aria-label="Close">×</button>
+    <div class="pv-stage" id="pvStage">
+      <img id="pvImage" src="" alt="">
+    </div>
+    <div class="pv-counter" id="pvCounter"></div>
   </div>
 
   <script src="helpers.js"></script>

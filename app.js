@@ -16,6 +16,19 @@
   let timelineTypeFilter = 'all';
   let recapDogId = null; // which dog the open recap sheet is showing
   let bulkImportGroups = []; // [{date, photoIds: [], previewUrls: [], location, skipped}] during a bulk import review
+  let editingEntryId = null; // set when the entry sheet is in "edit" mode
+  let editingEntryOriginal = null; // the full original entry record being edited, for merging on save
+  let removedExistingPhotoIds = []; // existing photos removed while editing, cleaned up from storage on save
+  let photoViewerContext = { photoIds: [], index: 0 };
+  let pendingVaccineSchedule = []; // [{label, dueDate, skipped}] while reviewing the suggested schedule
+
+  // Session-lived cache of photoId -> full-resolution object URL, for the
+  // full-screen photo viewer (separate from photoUrlCache, which holds thumbs).
+  const fullUrlCache = new Map();
+  // id -> entry record, refreshed whenever entries are fetched for rendering.
+  // Lets click handlers (favorite, edit, photo viewer) look an entry up
+  // without needing the whole entries array threaded through every call.
+  const entryLookupById = new Map();
 
   // Session-lived cache of photoId -> thumbnail object URL, so repeated
   // renders (dog switcher, timeline, profile) don't keep creating fresh
@@ -30,6 +43,7 @@
   const screens = {
     timeline: $('#screen-timeline'),
     weight: $('#screen-weight'),
+    stats: $('#screen-stats'),
     profile: $('#screen-profile'),
     backup: $('#screen-backup'),
   };
@@ -179,6 +193,7 @@
     if (!currentDog()) return;
     if (activeTab === 'timeline') await renderTimeline();
     if (activeTab === 'weight') await renderWeight();
+    if (activeTab === 'stats') await renderStats();
     if (activeTab === 'profile') await renderProfile();
   }
 
@@ -255,18 +270,8 @@
     }
 
     content.innerHTML = html;
-
-    $$('.fav-btn').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const id = btn.dataset.id;
-        const entry = allEntries.find((en) => en.id === id);
-        entry.favorite = !entry.favorite;
-        await Entries.update(entry);
-        btn.classList.toggle('active', entry.favorite);
-        btn.textContent = entry.favorite ? '♥' : '♡';
-      });
-    });
+    allEntries.forEach((e) => entryLookupById.set(e.id, e));
+    wireEntryCardInteractions(content);
   }
 
   function entrySubtitleHtml(entry, today) {
@@ -294,9 +299,9 @@
     let photosHtml = '';
     if (validPhotos.length) {
       const n = validPhotos.length === 1 ? 'n1' : validPhotos.length === 2 ? 'n2' : 'nmany';
-      photosHtml = `<div class="entry-photos ${n}">${validPhotos
+      photosHtml = `<div class="entry-photos ${n}" data-photo-ids='${JSON.stringify(entry.photoIds || [])}'>${validPhotos
         .slice(0, 4)
-        .map((p) => `<img src="${objectUrlFor(p.thumbBlob)}" alt="">`)
+        .map((p, i) => `<img src="${objectUrlFor(p.thumbBlob)}" data-index="${i}" alt="">`)
         .join('')}</div>`;
     }
 
@@ -325,7 +330,7 @@
       .join(' ');
 
     return `
-      <div class="${cardClasses}">
+      <div class="${cardClasses}" data-id="${entry.id}">
         <div class="date-stamp">${H.formatDateShort(entry.date)} · ${meta.icon} ${meta.label}</div>
         ${photosHtml}
         <div class="entry-body">
@@ -338,6 +343,45 @@
           ${tagsHtml}
         </div>
       </div>`;
+  }
+
+  // Wires favoriting, tap-a-photo-to-view-fullscreen, and tap-the-card-to-edit
+  // for every .entry-card within a freshly-rendered container. Called after
+  // any innerHTML assignment that includes entry cards (timeline, health,
+  // milestones) — entries must already be registered in entryLookupById.
+  function wireEntryCardInteractions(containerEl) {
+    containerEl.querySelectorAll('.fav-btn').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const entry = entryLookupById.get(btn.dataset.id);
+        if (!entry) return;
+        entry.favorite = !entry.favorite;
+        await Entries.update(entry);
+        btn.classList.toggle('active', entry.favorite);
+        btn.textContent = entry.favorite ? '♥' : '♡';
+      });
+    });
+
+    containerEl.querySelectorAll('.loc-badge').forEach((a) => {
+      a.addEventListener('click', (e) => e.stopPropagation());
+    });
+
+    containerEl.querySelectorAll('.entry-photos img').forEach((img) => {
+      img.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const wrap = img.closest('.entry-photos');
+        const photoIds = JSON.parse(wrap.dataset.photoIds || '[]');
+        const index = Number(img.dataset.index || 0);
+        openPhotoViewer(photoIds, index);
+      });
+    });
+
+    containerEl.querySelectorAll('.entry-card').forEach((card) => {
+      card.addEventListener('click', () => {
+        const entry = entryLookupById.get(card.dataset.id);
+        if (entry) openEntryEditor(entry);
+      });
+    });
   }
 
   // ================= Weight =================
@@ -422,10 +466,12 @@
     if (!dog) return;
 
     const entries = await Entries.forDog(currentDogId);
+    entries.forEach((e) => entryLookupById.set(e.id, e));
     const milestones = entries.filter((e) => e.type === 'milestone' || e.favorite);
     const healthEntries = entries.filter((e) => e.type === 'vet' || e.type === 'vaccination');
     const age = dog.birthday ? H.calcAge(dog.birthday) : null;
     const avatarUrl = await getPhotoThumbUrl(dog.coverPhotoId);
+    const tags = H.getAllTags(entries);
 
     const today = H.todayLocalStr();
     const weekAgo = (() => {
@@ -452,6 +498,17 @@
       }
     }
 
+    const tagsHtml = tags.length
+      ? `<div class="month-heading">Tags</div>
+         <div style="margin-bottom:6px;">${tags
+           .map((t) => `<button type="button" class="tag-browse-chip" data-tag="${escapeHtml(t.tag)}">${escapeHtml(t.tag)} <span class="count">${t.count}</span></button>`)
+           .join('')}</div>`
+      : '';
+
+    // Offer the puppy vaccination schedule suggestion only while it's
+    // actually relevant — roughly the first two years.
+    const showVaccineSuggestion = age && age.years < 2 && dog.birthday;
+
     root.innerHTML = `
       <div class="dog-hero">
         <div class="avatar-lg">${avatarUrl ? `<img src="${avatarUrl}" alt="">` : initials(dog.name)}</div>
@@ -476,9 +533,14 @@
         </div>
       </div>
 
+      ${showVaccineSuggestion ? `<button class="btn btn-secondary btn-block" id="suggestVaccineBtn" style="margin-top:14px;">💉 Suggest vaccination schedule</button>` : ''}
+
+      ${tagsHtml}
       ${healthHtml}
       ${milestonesHtml}
     `;
+
+    wireEntryCardInteractions(root);
 
     $('#editDogBtn').addEventListener('click', () => {
       editingDogId = dog.id;
@@ -494,6 +556,19 @@
     });
 
     $('#recapBtn').addEventListener('click', () => openRecapSheet(dog.id));
+
+    $$('.tag-browse-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        timelineQuery = chip.dataset.tag;
+        timelineTypeFilter = 'all';
+        $('#timelineSearch').value = chip.dataset.tag;
+        $$('.filter-chip').forEach((c) => c.classList.toggle('active', c.dataset.type === 'all'));
+        setTab('timeline');
+      });
+    });
+
+    const suggestBtn = $('#suggestVaccineBtn');
+    if (suggestBtn) suggestBtn.addEventListener('click', () => openVaccineScheduleSheet(dog));
   }
 
   // ================= Year in review =================
@@ -603,7 +678,7 @@
 
   async function handleDogPhotoSelection(fileList) {
     const file = (fileList || [])[0];
-    if (!file || !file.type.startsWith('image/')) return;
+    if (!file || !looksLikeImageFile(file)) return;
     showToast('Processing photo…');
     try {
       const { thumbBlob, fullBlob } = await window.Media.processPhoto(file);
@@ -612,7 +687,7 @@
       dogPhotoRemoved = false;
     } catch (err) {
       console.error('Dog photo processing failed', err);
-      showToast("Couldn't read that photo — try a different one");
+      showToast(describeError(err));
       return;
     }
     renderDogAvatarPicker('');
@@ -701,6 +776,13 @@
   }
 
   function resetEntryForm() {
+    editingEntryId = null;
+    editingEntryOriginal = null;
+    removedExistingPhotoIds = [];
+    $('#entrySheetTitle').textContent = 'New entry';
+    $('#saveEntryBtn').textContent = 'Add to timeline';
+    $('#entrySheetDelete').classList.add('hidden');
+
     $('#entryDate').value = H.todayLocalStr();
     $('#entryCaption').value = '';
     $('#entryTags').value = '';
@@ -715,6 +797,56 @@
     $$('.type-toggle button').forEach((b) => b.classList.toggle('selected', b.dataset.type === 'photo'));
     $('#entrySheet').dataset.type = 'photo';
     updateTypeOnlyFields('photo');
+  }
+
+  // Opens the same sheet used for adding, pre-filled from an existing entry.
+  async function openEntryEditor(entry) {
+    editingEntryId = entry.id;
+    editingEntryOriginal = entry;
+    removedExistingPhotoIds = [];
+
+    $('#entrySheetTitle').textContent = 'Edit entry';
+    $('#saveEntryBtn').textContent = 'Save changes';
+    $('#entrySheetDelete').classList.remove('hidden');
+
+    $('#entryDate').value = entry.date;
+    $('#entryCaption').value = entry.caption || '';
+    $('#entryTags').value = (entry.tags || []).join(', ');
+    $('#walkDistanceKm').value = entry.distanceKm || '';
+    $('#walkDurationMin').value = entry.durationMin || '';
+    $('#vaccineNextDue').value = entry.nextDueDate || '';
+    pendingEntryLocation = entry.location || null;
+    // The date is already meaningfully set from the saved entry — treat it
+    // as "manually edited" so adding a new photo during this edit can't
+    // silently overwrite a date the user is intentionally keeping.
+    entryDateManuallyEdited = true;
+
+    pendingPhotos.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+    const existingPhotoRecords = await Promise.all((entry.photoIds || []).map((id) => Photos.get(id).catch(() => null)));
+    pendingPhotos = existingPhotoRecords
+      .filter(Boolean)
+      .map((rec) => ({ existingPhotoId: rec.id, thumbBlob: rec.thumbBlob, fullBlob: rec.fullBlob, previewUrl: objectUrlFor(rec.thumbBlob) }));
+    renderPhotoPicker();
+
+    $$('.type-toggle button').forEach((b) => b.classList.toggle('selected', b.dataset.type === entry.type));
+    $('#entrySheet').dataset.type = entry.type;
+    updateTypeOnlyFields(entry.type);
+
+    openSheet($('#entrySheet'));
+  }
+
+  async function deleteEntry() {
+    if (!editingEntryId || !editingEntryOriginal) return;
+    if (!confirm("Delete this entry? This can't be undone.")) return;
+
+    for (const id of editingEntryOriginal.photoIds || []) await Photos.remove(id);
+    await Entries.remove(editingEntryId);
+    entryLookupById.delete(editingEntryId);
+
+    closeSheet($('#entrySheet'));
+    showToast('Entry deleted');
+    if (activeTab === 'timeline') renderTimeline();
+    else if (activeTab === 'profile') renderProfile();
   }
 
   function renderPhotoPicker() {
@@ -738,25 +870,59 @@
     $$('.thumb .remove').forEach((btn) => {
       btn.addEventListener('click', () => {
         const i = Number(btn.dataset.i);
-        URL.revokeObjectURL(pendingPhotos[i].previewUrl);
+        const removed = pendingPhotos[i];
+        // Only revoke/drop a brand-new (not-yet-saved) photo's preview URL
+        // outright. An existing, already-stored photo needs its storage
+        // record cleaned up too — tracked here and actually deleted on save,
+        // so cancelling the edit entirely leaves the original untouched.
+        if (removed.existingPhotoId) {
+          removedExistingPhotoIds.push(removed.existingPhotoId);
+        } else {
+          URL.revokeObjectURL(removed.previewUrl);
+        }
         pendingPhotos.splice(i, 1);
         renderPhotoPicker();
       });
     });
   }
 
+  // EXIF reading is always best-effort and must never block a photo from
+  // being saved — if anything about it fails, treat it exactly like a photo
+  // that simply has no EXIF data.
+  async function safeParseExif(file) {
+    try {
+      return await window.Exif.parseExifFromFile(file);
+    } catch (err) {
+      console.warn('EXIF read failed, continuing without it:', err);
+      return { date: null, location: null };
+    }
+  }
+
+  // Some photo pickers (notably iOS's limited-access picker, in some
+  // versions) hand back files with an empty or nonstandard `type`. Fall
+  // back to the file extension so a real photo never gets silently dropped
+  // before it even reaches the processing step.
+  function looksLikeImageFile(file) {
+    if (file.type && file.type.startsWith('image/')) return true;
+    return /\.(jpe?g|png|heic|heif|gif|webp)$/i.test(file.name || '');
+  }
+
+  function describeError(err) {
+    if (err && err.stage) return `Couldn't read that photo (${err.stage} failed: ${err.cause ? err.cause.message : 'unknown'})`;
+    if (err && err.message) return `Couldn't read that photo (${err.message})`;
+    return "Couldn't read that photo — try a different one";
+  }
+
   async function handlePhotoSelection(fileList) {
-    const files = Array.from(fileList || []).filter((f) => f.type.startsWith('image/'));
+    const files = Array.from(fileList || []).filter(looksLikeImageFile);
     if (!files.length) return;
     showToast('Processing photo' + (files.length > 1 ? 's' : '') + '…');
     for (const file of files) {
       try {
-        const [{ thumbBlob, fullBlob }, exif] = await Promise.all([
-          window.Media.processPhoto(file),
-          window.Exif.parseExifFromFile(file),
-        ]);
+        const { thumbBlob, fullBlob } = await window.Media.processPhoto(file);
         pendingPhotos.push({ thumbBlob, fullBlob, previewUrl: objectUrlFor(thumbBlob) });
 
+        const exif = await safeParseExif(file);
         // Auto-fill the date from the photo's EXIF, but only if the user
         // hasn't already typed a date themselves — never overwrite a manual edit.
         if (exif.date && !entryDateManuallyEdited) {
@@ -768,7 +934,7 @@
         }
       } catch (err) {
         console.error('Photo processing failed', err);
-        showToast("Couldn't read that photo — try a different one");
+        showToast(describeError(err));
       }
     }
     renderPhotoPicker();
@@ -804,31 +970,64 @@
       return;
     }
 
-    const photoIds = [];
+    let photoIds = [];
     if (type === 'photo') {
       for (const p of pendingPhotos) {
-        const rec = await Photos.add({ thumbBlob: p.thumbBlob, fullBlob: p.fullBlob });
-        photoIds.push(rec.id);
+        if (p.existingPhotoId) {
+          photoIds.push(p.existingPhotoId);
+        } else {
+          const rec = await Photos.add({ thumbBlob: p.thumbBlob, fullBlob: p.fullBlob });
+          photoIds.push(rec.id);
+        }
+      }
+    } else {
+      // Type isn't (or is no longer) 'photo' — any previously-attached
+      // existing photos are now orphaned and should be cleaned up.
+      for (const p of pendingPhotos) {
+        if (p.existingPhotoId) removedExistingPhotoIds.push(p.existingPhotoId);
       }
     }
 
-    const entry = { dogId: currentDogId, date, type, caption, photoIds, tags };
-    if (type === 'photo' && pendingEntryLocation) {
-      entry.location = pendingEntryLocation;
-    }
-    if (type === 'walk') {
-      entry.distanceKm = distanceKm || undefined;
-      entry.durationMin = durationMin || undefined;
-    }
-    if (type === 'vaccination') {
-      entry.nextDueDate = nextDueDate;
+    let savedEntry;
+    if (editingEntryId) {
+      savedEntry = {
+        id: editingEntryOriginal.id,
+        dogId: editingEntryOriginal.dogId,
+        favorite: editingEntryOriginal.favorite,
+        createdAt: editingEntryOriginal.createdAt,
+        date,
+        type,
+        caption,
+        photoIds,
+        tags,
+      };
+      if (type === 'photo' && pendingEntryLocation) savedEntry.location = pendingEntryLocation;
+      if (type === 'walk') {
+        savedEntry.distanceKm = distanceKm || undefined;
+        savedEntry.durationMin = durationMin || undefined;
+      }
+      if (type === 'vaccination') savedEntry.nextDueDate = nextDueDate;
+      await Entries.update(savedEntry);
+      entryLookupById.set(savedEntry.id, savedEntry);
+    } else {
+      const entry = { dogId: currentDogId, date, type, caption, photoIds, tags };
+      if (type === 'photo' && pendingEntryLocation) entry.location = pendingEntryLocation;
+      if (type === 'walk') {
+        entry.distanceKm = distanceKm || undefined;
+        entry.durationMin = durationMin || undefined;
+      }
+      if (type === 'vaccination') entry.nextDueDate = nextDueDate;
+      savedEntry = await Entries.add(entry);
+      entryLookupById.set(savedEntry.id, savedEntry);
     }
 
-    await Entries.add(entry);
+    for (const id of removedExistingPhotoIds) await Photos.remove(id);
 
+    const wasEditing = !!editingEntryId;
     closeSheet($('#entrySheet'));
-    showToast('Added to timeline');
+    showToast(wasEditing ? 'Entry updated' : 'Added to timeline');
     if (activeTab === 'timeline') renderTimeline();
+    else if (activeTab === 'profile') renderProfile();
   }
 
   // ================= Bulk photo import =================
@@ -859,7 +1058,7 @@
   }
 
   async function handleBulkPhotoSelection(fileList) {
-    const files = Array.from(fileList || []).filter((f) => f.type.startsWith('image/'));
+    const files = Array.from(fileList || []).filter(looksLikeImageFile);
     if (!files.length) return;
 
     $('#bulkImportBody').classList.add('hidden');
@@ -869,24 +1068,27 @@
     // A flat list of processed photos before grouping — processed one at a
     // time (not in parallel) to keep memory use bounded for large batches.
     const processed = [];
+    const failures = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       progress.textContent = `Processing photo ${i + 1} of ${files.length}…`;
       try {
-        const [{ thumbBlob, fullBlob }, exif] = await Promise.all([
-          window.Media.processPhoto(file),
-          window.Exif.parseExifFromFile(file),
-        ]);
+        const { thumbBlob, fullBlob } = await window.Media.processPhoto(file);
+        const exif = await safeParseExif(file);
         const rec = await Photos.add({ thumbBlob, fullBlob });
         const date = exif.date || dateFromFileTimestamp(file);
         processed.push({ photoId: rec.id, date, location: exif.location, previewUrl: objectUrlFor(thumbBlob) });
       } catch (err) {
         console.error('Bulk photo processing failed for', file.name, err);
+        failures.push(file.name || `photo ${i + 1}`);
       }
     }
 
     progress.classList.add('hidden');
+    if (failures.length) {
+      showToast(`${failures.length} of ${files.length} photo${files.length === 1 ? '' : 's'} couldn't be read and were skipped`);
+    }
 
     // Group by date.
     const byDate = new Map();
@@ -976,11 +1178,227 @@
     if (activeTab === 'timeline') renderTimeline();
   }
 
+  // ================= Full-screen photo viewer =================
+
+  async function getPhotoFullUrl(photoId) {
+    if (fullUrlCache.has(photoId)) return fullUrlCache.get(photoId);
+    const rec = await Photos.get(photoId).catch(() => null);
+    const url = rec && rec.fullBlob ? objectUrlFor(rec.fullBlob) : rec && rec.thumbBlob ? objectUrlFor(rec.thumbBlob) : '';
+    fullUrlCache.set(photoId, url);
+    return url;
+  }
+
+  async function showPhotoViewerImage() {
+    const { photoIds, index } = photoViewerContext;
+    const img = $('#pvImage');
+    img.style.transform = '';
+    img.classList.remove('snap-back');
+    img.src = await getPhotoFullUrl(photoIds[index]);
+    $('#pvCounter').textContent = photoIds.length > 1 ? `${index + 1} / ${photoIds.length}` : '';
+  }
+
+  function openPhotoViewer(photoIds, startIndex) {
+    if (!photoIds || !photoIds.length) return;
+    photoViewerContext = { photoIds, index: Math.min(startIndex, photoIds.length - 1) };
+    $('#photoViewer').classList.add('open');
+    showPhotoViewerImage();
+  }
+
+  function closePhotoViewer() {
+    $('#photoViewer').classList.remove('open');
+    $('#pvImage').src = '';
+  }
+
+  function wirePhotoViewerSwipe() {
+    const img = $('#pvImage');
+    let startX = 0;
+    let dragging = false;
+
+    img.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) return;
+      startX = e.touches[0].clientX;
+      dragging = true;
+      img.classList.remove('snap-back');
+    }, { passive: true });
+
+    img.addEventListener('touchmove', (e) => {
+      if (!dragging) return;
+      const dx = e.touches[0].clientX - startX;
+      img.style.transform = `translateX(${dx}px)`;
+    }, { passive: true });
+
+    img.addEventListener('touchend', (e) => {
+      if (!dragging) return;
+      dragging = false;
+      const dx = (e.changedTouches[0] ? e.changedTouches[0].clientX : startX) - startX;
+      const threshold = 70;
+      const { photoIds, index } = photoViewerContext;
+
+      img.classList.add('snap-back');
+      if (dx < -threshold && index < photoIds.length - 1) {
+        photoViewerContext.index += 1;
+        showPhotoViewerImage();
+      } else if (dx > threshold && index > 0) {
+        photoViewerContext.index -= 1;
+        showPhotoViewerImage();
+      } else {
+        img.style.transform = 'translateX(0px)';
+      }
+    });
+  }
+
+  // ================= Stats dashboard =================
+
+  async function renderStats() {
+    const root = $('#screen-stats');
+    const entries = await Entries.forDog(currentDogId);
+
+    if (!entries.length) {
+      root.innerHTML = emptyStateHtml('📊', 'Nothing to show yet', 'Stats will appear here once you start logging entries.');
+      return;
+    }
+
+    const today = H.todayLocalStr();
+    const months = H.entriesPerMonth(entries, 12, today);
+    const maxCount = Math.max(1, ...months.map((m) => m.count));
+    const streak = H.longestStreak(entries);
+    const totalPhotos = entries.reduce((sum, e) => sum + (e.photoIds ? e.photoIds.length : 0), 0);
+
+    const byType = {};
+    for (const e of entries) byType[e.type] = (byType[e.type] || 0) + 1;
+    const typeRows = Object.entries(byType)
+      .sort((a, b) => b[1] - a[1])
+      .map(([type, count]) => {
+        const meta = TYPE_META[type] || TYPE_META.note;
+        return `<div class="weight-row"><span>${meta.icon} ${meta.label}</span><span class="w-val">${count}</span></div>`;
+      })
+      .join('');
+
+    const barsHtml = months
+      .map((m) => {
+        const heightPct = Math.max(4, Math.round((m.count / maxCount) * 100));
+        return `<div class="bar-col"><div class="bar" style="height:${heightPct}%" title="${m.count}"></div><div class="bar-label">${m.label}</div></div>`;
+      })
+      .join('');
+
+    root.innerHTML = `
+      <div class="recap-grid" style="margin-top:6px;">
+        <div class="stat-card">
+          <div class="value">${entries.length}</div>
+          <div class="label">Total entries</div>
+        </div>
+        <div class="stat-card">
+          <div class="value">${totalPhotos}</div>
+          <div class="label">Photos</div>
+        </div>
+      </div>
+      <div class="recap-grid">
+        <div class="stat-card">
+          <div class="value">${streak}</div>
+          <div class="label">Longest streak (days)</div>
+        </div>
+        <div class="stat-card">
+          <div class="value">${H.getAllTags(entries).length}</div>
+          <div class="label">Distinct tags</div>
+        </div>
+      </div>
+      <div class="chart-card">
+        <div style="font-size:12px; color:var(--ink-soft); margin-bottom:4px;">Entries per month</div>
+        <div class="bar-chart">${barsHtml}</div>
+      </div>
+      <div class="month-heading">By type</div>
+      ${typeRows}
+    `;
+  }
+
+  // ================= Puppy vaccination schedule =================
+
+  function openVaccineScheduleSheet(dog) {
+    pendingVaccineSchedule = H.puppyVaccinationSchedule(dog.birthday).map((s) => ({ ...s, skipped: false }));
+    renderVaccineScheduleRows();
+    openSheet($('#vaccineScheduleSheet'));
+  }
+
+  function renderVaccineScheduleRows() {
+    const wrap = $('#vaccineScheduleRows');
+    wrap.innerHTML = '';
+    pendingVaccineSchedule.forEach((item, i) => {
+      const row = document.createElement('div');
+      row.className = 'vaccine-row' + (item.skipped ? ' skipped' : '');
+      row.innerHTML = `
+        <div class="row-top">
+          <span class="label">${escapeHtml(item.label)}</span>
+          <button type="button" class="skip-btn">${item.skipped ? 'Include' : 'Skip'}</button>
+        </div>
+        <input type="date" value="${item.dueDate}" ${item.skipped ? 'disabled' : ''}>
+      `;
+      row.querySelector('input[type="date"]').addEventListener('change', (e) => {
+        item.dueDate = e.target.value || item.dueDate;
+      });
+      row.querySelector('.skip-btn').addEventListener('click', () => {
+        item.skipped = !item.skipped;
+        renderVaccineScheduleRows();
+      });
+      wrap.appendChild(row);
+    });
+  }
+
+  async function confirmVaccineSchedule() {
+    const today = H.todayLocalStr();
+    const toAdd = pendingVaccineSchedule.filter((s) => !s.skipped);
+    for (const item of toAdd) {
+      const entry = await Entries.add({
+        dogId: currentDogId,
+        date: today,
+        type: 'vaccination',
+        caption: item.label,
+        photoIds: [],
+        tags: [],
+        nextDueDate: item.dueDate,
+      });
+      entryLookupById.set(entry.id, entry);
+    }
+    pendingVaccineSchedule = [];
+    closeSheet($('#vaccineScheduleSheet'));
+    showToast(`Added ${toAdd.length} reminder${toAdd.length === 1 ? '' : 's'}`);
+    if (activeTab === 'profile') renderProfile();
+    else if (activeTab === 'timeline') renderTimeline();
+  }
+
+  // ================= Theme =================
+
+  function resolveTheme(mode) {
+    if (mode === 'dark' || mode === 'light') return mode;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+
+  function applyTheme(mode) {
+    document.documentElement.setAttribute('data-theme', resolveTheme(mode));
+  }
+
+  function setThemePreference(mode) {
+    localStorage.setItem('pawbook_theme', mode);
+    applyTheme(mode);
+  }
+
+  function getThemePreference() {
+    return localStorage.getItem('pawbook_theme') || 'system';
+  }
+
   // ================= Backup screen =================
 
   function renderBackupScreen() {
     const root = $('#screen-backup');
+    const currentPref = getThemePreference();
     root.innerHTML = `
+      <div class="backup-card">
+        <h3>Display</h3>
+        <div class="type-toggle" id="themeToggle" style="grid-template-columns: repeat(3, 1fr);">
+          <button type="button" data-mode="system" class="${currentPref === 'system' ? 'selected' : ''}">System</button>
+          <button type="button" data-mode="light" class="${currentPref === 'light' ? 'selected' : ''}">Light</button>
+          <button type="button" data-mode="dark" class="${currentPref === 'dark' ? 'selected' : ''}">Dark</button>
+        </div>
+      </div>
       <div class="backup-card">
         <h3>Export backup</h3>
         <p>Saves everything — every dog, entry, photo, and weigh-in — to a single file you keep yourself (Files app, iCloud Drive, email to yourself, wherever). Since PawBook stores data only on this device, this is the only way it survives a lost or replaced phone.</p>
@@ -995,6 +1413,13 @@
         <div class="backup-status" id="importStatus"></div>
       </div>
     `;
+
+    $$('#themeToggle button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        setThemePreference(btn.dataset.mode);
+        $$('#themeToggle button').forEach((b) => b.classList.toggle('selected', b === btn));
+      });
+    });
 
     $('#exportBtn').addEventListener('click', async () => {
       const status = $('#exportStatus');
@@ -1131,6 +1556,25 @@
       const entries = await Entries.forDog(recapDogId);
       const weights = await Weights.forDog(recapDogId);
       renderRecapContent(entries, weights, Number(e.target.value));
+    });
+
+    $('#entrySheetDelete').addEventListener('click', deleteEntry);
+
+    $('#pvCloseBtn').addEventListener('click', closePhotoViewer);
+    $('#pvStage').addEventListener('click', (e) => {
+      if (e.target.id === 'pvStage') closePhotoViewer();
+    });
+    wirePhotoViewerSwipe();
+
+    $('#confirmVaccineScheduleBtn').addEventListener('click', confirmVaccineSchedule);
+  }
+
+  // ================= Theme boot =================
+
+  applyTheme(getThemePreference());
+  if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+      if (getThemePreference() === 'system') applyTheme('system');
     });
   }
 

@@ -211,6 +211,78 @@ function yearsWithData(entries, weights, todayStr) {
   return [...years].sort((a, b) => b - a);
 }
 
+// All distinct tags across a list of entries, with usage counts, sorted
+// most-used first (ties broken alphabetically for stable, predictable order).
+function getAllTags(entries) {
+  const counts = new Map();
+  for (const e of entries) {
+    for (const tag of e.tags || []) {
+      counts.set(tag, (counts.get(tag) || 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+}
+
+// Entry counts for each of the last `monthsBack` months (inclusive of the
+// current month), oldest first — including months with zero entries, so a
+// bar chart has a consistent, gap-free x-axis.
+function entriesPerMonth(entries, monthsBack, todayStr) {
+  const today = parseLocalDate(todayStr || todayLocalStr());
+  const buckets = [];
+  for (let i = monthsBack - 1; i >= 0; i--) {
+    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    buckets.push({ year: d.getFullYear(), month: d.getMonth(), label: d.toLocaleDateString(undefined, { month: 'short' }), count: 0 });
+  }
+  const index = new Map(buckets.map((b) => [`${b.year}-${b.month}`, b]));
+  for (const e of entries) {
+    const d = parseLocalDate(e.date);
+    const bucket = index.get(`${d.getFullYear()}-${d.getMonth()}`);
+    if (bucket) bucket.count += 1;
+  }
+  return buckets;
+}
+
+// Longest run of consecutive calendar days containing at least one entry.
+function longestStreak(entries) {
+  if (!entries.length) return 0;
+  const uniqueDays = [...new Set(entries.map((e) => e.date))].sort();
+  let longest = 1;
+  let current = 1;
+  for (let i = 1; i < uniqueDays.length; i++) {
+    const prev = parseLocalDate(uniqueDays[i - 1]);
+    const cur = parseLocalDate(uniqueDays[i]);
+    const dayGap = Math.round((cur - prev) / 86400000);
+    current = dayGap === 1 ? current + 1 : 1;
+    if (current > longest) longest = current;
+  }
+  return longest;
+}
+
+// A commonly-cited GENERIC puppy vaccination schedule, offset from a known
+// birthday — offered purely as an editable starting point, never as actual
+// veterinary advice (see the disclaimer shown wherever this is used).
+// Offsets are in whole weeks from birth.
+const PUPPY_VACCINE_SCHEDULE_WEEKS = [
+  { label: 'DHPP (1st round)', weeks: 8 },
+  { label: 'DHPP (2nd round)', weeks: 12 },
+  { label: 'DHPP (3rd round) + Rabies', weeks: 16 },
+  { label: 'Booster', weeks: 52 },
+];
+
+function puppyVaccinationSchedule(birthdayStr) {
+  const birth = parseLocalDate(birthdayStr);
+  return PUPPY_VACCINE_SCHEDULE_WEEKS.map(({ label, weeks }) => {
+    const due = new Date(birth);
+    due.setDate(due.getDate() + weeks * 7);
+    const y = due.getFullYear();
+    const m = String(due.getMonth() + 1).padStart(2, '0');
+    const d = String(due.getDate()).padStart(2, '0');
+    return { label, dueDate: `${y}-${m}-${d}` };
+  });
+}
+
 const api = {
   parseLocalDate,
   todayLocalStr,
@@ -229,6 +301,10 @@ const api = {
   walkStats,
   buildYearRecap,
   yearsWithData,
+  getAllTags,
+  entriesPerMonth,
+  longestStreak,
+  puppyVaccinationSchedule,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

@@ -20,6 +20,19 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+:root[data-theme="dark"] {
+  --paper: #1C1912;
+  --card: #262219;
+  --ink: #F2EBDD;
+  --ink-soft: #B8AF9C;
+  --rust: #E2694A;
+  --rust-dim: #4A2E24;
+  --moss: #8FA06B;
+  --gold: #E8B463;
+  --line: #3A352A;
+  --shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -672,6 +685,147 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:fo
   text-decoration: none;
   font-size: 13px;
 }
+
+/* ---------- Full-screen photo viewer ---------- */
+
+.photo-viewer {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 8, 5, 0.96);
+  z-index: 200;
+  display: none;
+  touch-action: pan-y;
+}
+.photo-viewer.open { display: flex; flex-direction: column; }
+
+.pv-close {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  right: 16px;
+  z-index: 201;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.pv-stage {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+.pv-stage img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.pv-stage img.snap-back {
+  transition: transform 0.25s ease;
+}
+
+.pv-counter {
+  text-align: center;
+  color: rgba(255, 255, 255, 0.65);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 10px 0 calc(16px + env(safe-area-inset-bottom, 0px));
+}
+
+/* ---------- Stats bar chart ---------- */
+
+.bar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 120px;
+  margin: 6px 0 4px;
+}
+.bar-chart .bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+}
+.bar-chart .bar {
+  width: 100%;
+  background: var(--rust);
+  border-radius: 4px 4px 0 0;
+  min-height: 2px;
+}
+.bar-chart .bar-label {
+  font-size: 9px;
+  color: var(--ink-soft);
+  margin-top: 4px;
+  font-family: var(--font-mono);
+}
+
+/* ---------- Tag browser ---------- */
+
+.tag-browse-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 8px 14px;
+  margin: 0 8px 8px 0;
+  font-size: 13px;
+  color: var(--ink);
+}
+.tag-browse-chip .count { color: var(--ink-soft); font-size: 11px; }
+
+/* ---------- Vaccine schedule review ---------- */
+
+.vaccine-row {
+  background: var(--card);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 8px;
+  box-shadow: var(--shadow);
+}
+.vaccine-row .row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.vaccine-row .label { font-size: 14px; font-weight: 600; }
+.vaccine-row input[type="date"] {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+  background: var(--paper);
+  font-family: inherit;
+  color: var(--ink);
+}
+.vaccine-row .skip-btn { border: none; background: none; color: var(--rust); font-size: 12px; font-weight: 600; }
+.vaccine-row.skipped { opacity: 0.4; }
+
+/* ---------- Settings / toggle row ---------- */
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+.settings-row span { font-size: 14px; }
 
 /* ---------- Toast ---------- */
 
