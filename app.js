@@ -678,7 +678,11 @@
 
   async function handleDogPhotoSelection(fileList) {
     const file = (fileList || [])[0];
-    if (!file || !looksLikeImageFile(file)) return;
+    if (!file) return;
+    if (!looksLikeImageFile(file)) {
+      showToast("Couldn't read that photo");
+      return;
+    }
     showToast('Processing photo…');
     try {
       const { thumbBlob, fullBlob } = await window.Media.processPhoto(file);
@@ -902,9 +906,20 @@
   // versions) hand back files with an empty or nonstandard `type`. Fall
   // back to the file extension so a real photo never gets silently dropped
   // before it even reaches the processing step.
+  // Some photo pickers (notably iOS's limited-access picker, in some
+  // versions/situations) hand back files with an empty `type` and a
+  // filename that doesn't obviously look like an image. Previously this
+  // filtered such files out entirely — which, combined with
+  // `accept="image/*"` already constraining what the OS picker shows in
+  // the first place, meant a whole multi-photo selection could silently
+  // vanish with zero feedback. Now: only reject a file when its type is
+  // explicitly set to something that is NOT an image. An unknown/empty
+  // type is given the benefit of the doubt and attempted — if it genuinely
+  // isn't a readable image, Media.processPhoto's own diagnostic error
+  // handles that case visibly instead of a silent no-op.
   function looksLikeImageFile(file) {
-    if (file.type && file.type.startsWith('image/')) return true;
-    return /\.(jpe?g|png|heic|heif|gif|webp)$/i.test(file.name || '');
+    if (file.type) return file.type.startsWith('image/');
+    return true;
   }
 
   function describeError(err) {
@@ -914,8 +929,12 @@
   }
 
   async function handlePhotoSelection(fileList) {
+    const rawCount = (fileList || []).length;
     const files = Array.from(fileList || []).filter(looksLikeImageFile);
-    if (!files.length) return;
+    if (!files.length) {
+      if (rawCount > 0) showToast(`Couldn't read the selected photo${rawCount === 1 ? '' : 's'}`);
+      return;
+    }
     showToast('Processing photo' + (files.length > 1 ? 's' : '') + '…');
     for (const file of files) {
       try {
@@ -1058,8 +1077,14 @@
   }
 
   async function handleBulkPhotoSelection(fileList) {
+    const rawCount = (fileList || []).length;
     const files = Array.from(fileList || []).filter(looksLikeImageFile);
-    if (!files.length) return;
+    if (!files.length) {
+      if (rawCount > 0) {
+        showToast(`Couldn't read any of the ${rawCount} selected photo${rawCount === 1 ? '' : 's'}`);
+      }
+      return;
+    }
 
     $('#bulkImportBody').classList.add('hidden');
     const progress = $('#bulkImportProgress');
