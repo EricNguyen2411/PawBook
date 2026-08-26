@@ -288,12 +288,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:fo
 .entry-photos.n1 { grid-template-columns: 1fr; }
 .entry-photos.n2 { grid-template-columns: 1fr 1fr; }
 .entry-photos.n3, .entry-photos.nmany { grid-template-columns: 1fr 1fr; }
-.entry-photos img {
+.entry-photos .photo-thumb-wrap {
   width: 100%;
   aspect-ratio: 1;
+  background: var(--line);
+  overflow: hidden;
+}
+.entry-photos img {
+  width: 100%;
+  height: 100%;
   object-fit: cover;
   display: block;
-  background: var(--line);
 }
 
 .entry-body { padding: 14px 16px 16px; }
@@ -733,6 +738,28 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:fo
 .pv-stage img.snap-back {
   transition: transform 0.25s ease;
 }
+.pv-stage video {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.pv-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 201;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  font-size: 22px;
+  line-height: 1;
+}
+.pv-nav.pv-prev { left: 10px; }
+.pv-nav.pv-next { right: 10px; }
+.pv-nav:disabled { opacity: 0; pointer-events: none; }
 
 .pv-counter {
   text-align: center;
@@ -740,6 +767,33 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:fo
   font-family: var(--font-mono);
   font-size: 12px;
   padding: 10px 0 calc(16px + env(safe-area-inset-bottom, 0px));
+}
+
+/* ---------- Video thumbnails (grid + picker) ---------- */
+
+.photo-thumb-wrap {
+  position: relative;
+}
+.play-badge {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  pointer-events: none;
+}
+.photo-picker .thumb .play-badge {
+  width: 22px;
+  height: 22px;
+  font-size: 10px;
 }
 
 /* ---------- Stats bar chart ---------- */

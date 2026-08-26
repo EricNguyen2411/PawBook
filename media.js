@@ -20,6 +20,8 @@
 const THUMB_MAX_DIM = 480; // enough for any card/grid this app shows
 const FULL_MAX_DIM = 1600; // enough for a full-screen phone view
 const TOBLOB_TIMEOUT_MS = 15000; // guards against toBlob's callback never firing
+const MAX_VIDEO_BYTES = 200 * 1024 * 1024; // 200MB — protects IndexedDB storage/backup size, not a codec limit
+const VIDEO_LOAD_TIMEOUT_MS = 20000; // guards against a video that never fires loadedmetadata/seeked
 
 class PhotoProcessingError extends Error {
   constructor(stage, cause) {
@@ -28,6 +30,13 @@ class PhotoProcessingError extends Error {
     this.stage = stage;
     this.cause = cause;
   }
+}
+
+// Trusts an explicit video/* type completely. When type is missing (see the
+// same reasoning in app.js's looksLikeImageFile), falls back to extension.
+function isVideoFile(file) {
+  if (file.type) return file.type.startsWith('video/');
+  return /\.(mp4|mov|m4v|webm|avi)$/i.test(file.name || '');
 }
 
 // Pure function, deliberately separated from any DOM/canvas API so it can
@@ -138,10 +147,71 @@ async function processPhoto(file) {
       console.warn('Full-size encode failed, reusing thumbnail for both:', err);
       fullBlob = thumbBlob;
     }
-    return { thumbBlob, fullBlob };
+    return { thumbBlob, fullBlob, mediaType: 'photo' };
   } finally {
     cleanup();
   }
 }
 
-window.Media = { processPhoto, computeResizeDimensions, PhotoProcessingError };
+// Loads a video file into an offscreen <video> element and waits for a
+// decoded frame partway into the clip (frame 0 is very often black/blank on
+// real camera footage), so it can be drawn to canvas the same way an image
+// or ImageBitmap would be.
+function captureVideoFrame(file) {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+    const url = URL.createObjectURL(file);
+    video.src = url;
+
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      URL.revokeObjectURL(url);
+      reject(new PhotoProcessingError('decode', new Error('timed out loading video')));
+    }, VIDEO_LOAD_TIMEOUT_MS);
+
+    video.onloadedmetadata = () => {
+      // Seek a little way in, capped to the clip's own length for very short videos.
+      video.currentTime = Math.min(0.3, (video.duration || 1) / 2);
+    };
+    video.onseeked = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ source: video, dims: { w: video.videoWidth, h: video.videoHeight }, url });
+    };
+    video.onerror = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      URL.revokeObjectURL(url);
+      reject(new PhotoProcessingError('decode', new Error('<video> element could not decode this file')));
+    };
+  });
+}
+
+// Unlike photos, the video itself is stored as-is (no client-side
+// transcoding — that needs a much heavier toolchain than fits this app's
+// offline-first, dependency-free approach). Only a poster-frame thumbnail
+// is generated, the same size/quality as a photo thumbnail, for grid display.
+async function processVideo(file) {
+  if (file.size > MAX_VIDEO_BYTES) {
+    const mb = (file.size / (1024 * 1024)).toFixed(0);
+    const capMb = MAX_VIDEO_BYTES / (1024 * 1024);
+    throw new PhotoProcessingError('size', new Error(`video is ${mb}MB, over the ${capMb}MB limit — try trimming it first`));
+  }
+
+  const { source, dims, url } = await captureVideoFrame(file);
+  try {
+    const thumbBlob = await resizeToBlob(source, dims, THUMB_MAX_DIM, 0.7);
+    return { thumbBlob, videoBlob: file, mediaType: 'video' };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+window.Media = { processPhoto, processVideo, isVideoFile, computeResizeDimensions, PhotoProcessingError, MAX_VIDEO_BYTES };

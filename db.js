@@ -156,8 +156,12 @@ const EntriesAPI = {
 // ---- Photos (stored as blobs; thumb + full kept separately, see media.js) ----
 
 const PhotosAPI = {
-  async add({ thumbBlob, fullBlob }) {
-    const record = { id: uuid(), thumbBlob, fullBlob, createdAt: Date.now() };
+  async add(fields) {
+    // Spread first — same reasoning as Entries.add above. Previously this
+    // only kept thumbBlob/fullBlob, which would have silently dropped
+    // videoBlob and mediaType the same way it once dropped walk/vaccination
+    // fields on entries.
+    const record = { mediaType: 'photo', ...fields, id: uuid(), createdAt: Date.now() };
     const t = await tx(['photos'], 'readwrite');
     t.objectStore('photos').add(record);
     return record;

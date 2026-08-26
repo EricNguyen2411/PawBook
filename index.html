@@ -129,9 +129,9 @@
     </div>
 
     <div class="field type-only" data-for-type="photo">
-      <label>Photos</label>
+      <label>Photos &amp; videos</label>
       <div class="photo-picker" id="photoPicker"></div>
-      <input type="file" id="photoInput" accept="image/*" multiple style="display:none;">
+      <input type="file" id="photoInput" accept="image/*,video/*" multiple style="display:none;">
     </div>
 
     <div class="field">
@@ -184,16 +184,16 @@
   <!-- ===== Bulk photo import sheet ===== -->
   <div class="sheet" id="bulkImportSheet">
     <div class="grabber"></div>
-    <h3>Import photos</h3>
+    <h3>Import photos &amp; videos</h3>
     <div id="bulkImportBody">
       <p style="font-size:13.5px; color:var(--ink-soft); line-height:1.5; margin:0 0 14px;">
-        Pick a batch of photos and PawBook will read each one's capture date (and
-        location, if the photo has it) automatically, then group them into one
-        timeline entry per day. Review the dates below before importing — you
-        can adjust or skip any day.
+        Pick a batch of photos and videos, and PawBook will read each one's
+        capture date (and location, for photos that have it) automatically,
+        then group everything into one timeline entry per day. Review the
+        dates below before importing — you can adjust or skip any day.
       </p>
-      <button class="btn btn-primary btn-block" id="chooseBulkPhotosBtn">Choose photos…</button>
-      <input type="file" id="bulkPhotoInput" accept="image/*" multiple style="display:none;">
+      <button class="btn btn-primary btn-block" id="chooseBulkPhotosBtn">Choose photos &amp; videos…</button>
+      <input type="file" id="bulkPhotoInput" accept="image/*,video/*" multiple style="display:none;">
     </div>
     <div id="bulkImportProgress" class="hidden" style="font-size:13px; color:var(--ink-soft); margin:14px 0;"></div>
     <div id="bulkImportGroups"></div>
@@ -242,8 +242,11 @@
   <!-- ===== Full-screen photo viewer ===== -->
   <div class="photo-viewer" id="photoViewer">
     <button class="pv-close" id="pvCloseBtn" aria-label="Close">×</button>
+    <button class="pv-nav pv-prev" id="pvPrevBtn" aria-label="Previous">‹</button>
+    <button class="pv-nav pv-next" id="pvNextBtn" aria-label="Next">›</button>
     <div class="pv-stage" id="pvStage">
       <img id="pvImage" src="" alt="">
+      <video id="pvVideo" class="hidden" controls playsinline></video>
     </div>
     <div class="pv-counter" id="pvCounter"></div>
   </div>
@@ -252,6 +255,7 @@
   <script src="db.js"></script>
   <script src="media.js"></script>
   <script src="exif.js"></script>
+  <script src="video-meta.js"></script>
   <script src="backup.js"></script>
   <script src="app.js"></script>
 </body>

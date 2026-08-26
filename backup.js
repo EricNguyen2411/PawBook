@@ -45,8 +45,10 @@ async function exportBackup() {
     photos.push({
       id: rec.id,
       createdAt: rec.createdAt,
+      mediaType: rec.mediaType || 'photo',
       thumbBlob: rec.thumbBlob ? await blobToBase64(rec.thumbBlob) : null,
       fullBlob: rec.fullBlob ? await blobToBase64(rec.fullBlob) : null,
+      videoBlob: rec.videoBlob ? await blobToBase64(rec.videoBlob) : null,
     });
   }
 
@@ -95,7 +97,8 @@ async function restoreBackup(payload) {
   for (const rec of payload.photos || []) {
     const thumbBlob = rec.thumbBlob ? base64ToBlob(rec.thumbBlob) : null;
     const fullBlob = rec.fullBlob ? base64ToBlob(rec.fullBlob) : null;
-    await Photos.putRaw({ id: rec.id, thumbBlob, fullBlob, createdAt: rec.createdAt });
+    const videoBlob = rec.videoBlob ? base64ToBlob(rec.videoBlob) : null;
+    await Photos.putRaw({ id: rec.id, thumbBlob, fullBlob, videoBlob, mediaType: rec.mediaType || 'photo', createdAt: rec.createdAt });
   }
 
   for (const dog of payload.dogs || []) {

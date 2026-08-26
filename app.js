@@ -301,7 +301,10 @@
       const n = validPhotos.length === 1 ? 'n1' : validPhotos.length === 2 ? 'n2' : 'nmany';
       photosHtml = `<div class="entry-photos ${n}" data-photo-ids='${JSON.stringify(entry.photoIds || [])}'>${validPhotos
         .slice(0, 4)
-        .map((p, i) => `<img src="${objectUrlFor(p.thumbBlob)}" data-index="${i}" alt="">`)
+        .map((p, i) => {
+          const badge = p.mediaType === 'video' ? '<span class="play-badge">▶</span>' : '';
+          return `<div class="photo-thumb-wrap" data-index="${i}"><img src="${objectUrlFor(p.thumbBlob)}" alt="">${badge}</div>`;
+        })
         .join('')}</div>`;
     }
 
@@ -366,12 +369,12 @@
       a.addEventListener('click', (e) => e.stopPropagation());
     });
 
-    containerEl.querySelectorAll('.entry-photos img').forEach((img) => {
-      img.addEventListener('click', (e) => {
+    containerEl.querySelectorAll('.entry-photos .photo-thumb-wrap').forEach((thumbEl) => {
+      thumbEl.addEventListener('click', (e) => {
         e.stopPropagation();
-        const wrap = img.closest('.entry-photos');
+        const wrap = thumbEl.closest('.entry-photos');
         const photoIds = JSON.parse(wrap.dataset.photoIds || '[]');
-        const index = Number(img.dataset.index || 0);
+        const index = Number(thumbEl.dataset.index || 0);
         openPhotoViewer(photoIds, index);
       });
     });
@@ -829,7 +832,14 @@
     const existingPhotoRecords = await Promise.all((entry.photoIds || []).map((id) => Photos.get(id).catch(() => null)));
     pendingPhotos = existingPhotoRecords
       .filter(Boolean)
-      .map((rec) => ({ existingPhotoId: rec.id, thumbBlob: rec.thumbBlob, fullBlob: rec.fullBlob, previewUrl: objectUrlFor(rec.thumbBlob) }));
+      .map((rec) => ({
+        existingPhotoId: rec.id,
+        thumbBlob: rec.thumbBlob,
+        fullBlob: rec.fullBlob,
+        videoBlob: rec.videoBlob,
+        mediaType: rec.mediaType || 'photo',
+        previewUrl: objectUrlFor(rec.thumbBlob),
+      }));
     renderPhotoPicker();
 
     $$('.type-toggle button').forEach((b) => b.classList.toggle('selected', b.dataset.type === entry.type));
@@ -859,7 +869,8 @@
     pendingPhotos.forEach((p, i) => {
       const thumb = document.createElement('div');
       thumb.className = 'thumb';
-      thumb.innerHTML = `<img src="${p.previewUrl}" alt=""><button class="remove" data-i="${i}">×</button>`;
+      const badge = p.mediaType === 'video' ? '<span class="play-badge">▶</span>' : '';
+      thumb.innerHTML = `<img src="${p.previewUrl}" alt="">${badge}<button class="remove" data-i="${i}">×</button>`;
       wrap.appendChild(thumb);
     });
     const addBtn = document.createElement('button');
@@ -902,57 +913,83 @@
     }
   }
 
-  // Some photo pickers (notably iOS's limited-access picker, in some
-  // versions) hand back files with an empty or nonstandard `type`. Fall
-  // back to the file extension so a real photo never gets silently dropped
-  // before it even reaches the processing step.
+  async function safeParseVideoDate(file) {
+    try {
+      return await window.VideoMeta.parseVideoCreationDate(file);
+    } catch (err) {
+      console.warn('Video date read failed, continuing without it:', err);
+      return null;
+    }
+  }
+
   // Some photo pickers (notably iOS's limited-access picker, in some
   // versions/situations) hand back files with an empty `type` and a
-  // filename that doesn't obviously look like an image. Previously this
-  // filtered such files out entirely — which, combined with
-  // `accept="image/*"` already constraining what the OS picker shows in
-  // the first place, meant a whole multi-photo selection could silently
-  // vanish with zero feedback. Now: only reject a file when its type is
-  // explicitly set to something that is NOT an image. An unknown/empty
-  // type is given the benefit of the doubt and attempted — if it genuinely
-  // isn't a readable image, Media.processPhoto's own diagnostic error
-  // handles that case visibly instead of a silent no-op.
+  // filename that doesn't obviously look like media. Previously this
+  // filtered such files out entirely — which, combined with the file
+  // input's own `accept` attribute already constraining what the OS picker
+  // shows in the first place, meant a whole multi-file selection could
+  // silently vanish with zero feedback. Now: only reject a file when its
+  // type is explicitly set to something that is NOT an image or video. An
+  // unknown/empty type is given the benefit of the doubt and attempted —
+  // if it genuinely isn't readable, Media's own diagnostic error handles
+  // that case visibly instead of a silent no-op.
   function looksLikeImageFile(file) {
     if (file.type) return file.type.startsWith('image/');
     return true;
   }
 
+  function looksLikeMediaFile(file) {
+    if (file.type) return file.type.startsWith('image/') || file.type.startsWith('video/');
+    return true;
+  }
+
   function describeError(err) {
-    if (err && err.stage) return `Couldn't read that photo (${err.stage} failed: ${err.cause ? err.cause.message : 'unknown'})`;
-    if (err && err.message) return `Couldn't read that photo (${err.message})`;
-    return "Couldn't read that photo — try a different one";
+    if (err && err.stage) return `Couldn't process that file (${err.stage} failed: ${err.cause ? err.cause.message : 'unknown'})`;
+    if (err && err.message) return `Couldn't process that file (${err.message})`;
+    return "Couldn't process that file — try a different one";
+  }
+
+  // Single entry point for turning a picked File into stored media plus
+  // whatever date/location we can read from it — used by both the
+  // single-entry picker and bulk import, so the two flows can't drift apart
+  // (see rigorous-app-building skill, section 2, on that exact bug class).
+  async function captureMedia(file) {
+    if (window.Media.isVideoFile(file)) {
+      const { thumbBlob, videoBlob, mediaType } = await window.Media.processVideo(file);
+      const date = await safeParseVideoDate(file);
+      return { thumbBlob, videoBlob, mediaType, date, location: null };
+    }
+    const { thumbBlob, fullBlob, mediaType } = await window.Media.processPhoto(file);
+    const exif = await safeParseExif(file);
+    return { thumbBlob, fullBlob, mediaType, date: exif.date, location: exif.location };
   }
 
   async function handlePhotoSelection(fileList) {
     const rawCount = (fileList || []).length;
-    const files = Array.from(fileList || []).filter(looksLikeImageFile);
+    const files = Array.from(fileList || []).filter(looksLikeMediaFile);
     if (!files.length) {
-      if (rawCount > 0) showToast(`Couldn't read the selected photo${rawCount === 1 ? '' : 's'}`);
+      if (rawCount > 0) showToast(`Couldn't read the selected file${rawCount === 1 ? '' : 's'}`);
       return;
     }
-    showToast('Processing photo' + (files.length > 1 ? 's' : '') + '…');
+    showToast('Processing file' + (files.length > 1 ? 's' : '') + '…');
     for (const file of files) {
       try {
-        const { thumbBlob, fullBlob } = await window.Media.processPhoto(file);
-        pendingPhotos.push({ thumbBlob, fullBlob, previewUrl: objectUrlFor(thumbBlob) });
+        const { thumbBlob, fullBlob, videoBlob, mediaType, date, location } = await captureMedia(file);
+        pendingPhotos.push({ thumbBlob, fullBlob, videoBlob, mediaType, previewUrl: objectUrlFor(thumbBlob) });
 
-        const exif = await safeParseExif(file);
-        // Auto-fill the date from the photo's EXIF, but only if the user
+        // Auto-fill the date from the file's embedded date (EXIF for
+        // photos, container metadata for videos), but only if the user
         // hasn't already typed a date themselves — never overwrite a manual edit.
-        if (exif.date && !entryDateManuallyEdited) {
-          $('#entryDate').value = exif.date;
+        if (date && !entryDateManuallyEdited) {
+          $('#entryDate').value = date;
         }
-        // Take the first location we find across the picked photos.
-        if (exif.location && !pendingEntryLocation) {
-          pendingEntryLocation = exif.location;
+        // Take the first location we find across the picked photos (videos
+        // don't carry location in this app — see captureMedia above).
+        if (location && !pendingEntryLocation) {
+          pendingEntryLocation = location;
         }
       } catch (err) {
-        console.error('Photo processing failed', err);
+        console.error('Media processing failed', err);
         showToast(describeError(err));
       }
     }
@@ -995,7 +1032,7 @@
         if (p.existingPhotoId) {
           photoIds.push(p.existingPhotoId);
         } else {
-          const rec = await Photos.add({ thumbBlob: p.thumbBlob, fullBlob: p.fullBlob });
+          const rec = await Photos.add({ thumbBlob: p.thumbBlob, fullBlob: p.fullBlob, videoBlob: p.videoBlob, mediaType: p.mediaType || 'photo' });
           photoIds.push(rec.id);
         }
       }
@@ -1078,10 +1115,10 @@
 
   async function handleBulkPhotoSelection(fileList) {
     const rawCount = (fileList || []).length;
-    const files = Array.from(fileList || []).filter(looksLikeImageFile);
+    const files = Array.from(fileList || []).filter(looksLikeMediaFile);
     if (!files.length) {
       if (rawCount > 0) {
-        showToast(`Couldn't read any of the ${rawCount} selected photo${rawCount === 1 ? '' : 's'}`);
+        showToast(`Couldn't read any of the ${rawCount} selected file${rawCount === 1 ? '' : 's'}`);
       }
       return;
     }
@@ -1090,38 +1127,37 @@
     const progress = $('#bulkImportProgress');
     progress.classList.remove('hidden');
 
-    // A flat list of processed photos before grouping — processed one at a
+    // A flat list of processed media before grouping — processed one at a
     // time (not in parallel) to keep memory use bounded for large batches.
     const processed = [];
     const failures = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      progress.textContent = `Processing photo ${i + 1} of ${files.length}…`;
+      progress.textContent = `Processing ${i + 1} of ${files.length}…`;
       try {
-        const { thumbBlob, fullBlob } = await window.Media.processPhoto(file);
-        const exif = await safeParseExif(file);
-        const rec = await Photos.add({ thumbBlob, fullBlob });
-        const date = exif.date || dateFromFileTimestamp(file);
-        processed.push({ photoId: rec.id, date, location: exif.location, previewUrl: objectUrlFor(thumbBlob) });
+        const { thumbBlob, fullBlob, videoBlob, mediaType, date, location } = await captureMedia(file);
+        const rec = await Photos.add({ thumbBlob, fullBlob, videoBlob, mediaType });
+        const finalDate = date || dateFromFileTimestamp(file);
+        processed.push({ photoId: rec.id, date: finalDate, location, mediaType, previewUrl: objectUrlFor(thumbBlob) });
       } catch (err) {
-        console.error('Bulk photo processing failed for', file.name, err);
-        failures.push(file.name || `photo ${i + 1}`);
+        console.error('Bulk media processing failed for', file.name, err);
+        failures.push(file.name || `file ${i + 1}`);
       }
     }
 
     progress.classList.add('hidden');
     if (failures.length) {
-      showToast(`${failures.length} of ${files.length} photo${files.length === 1 ? '' : 's'} couldn't be read and were skipped`);
+      showToast(`${failures.length} of ${files.length} file${files.length === 1 ? '' : 's'} couldn't be read and were skipped`);
     }
 
     // Group by date.
     const byDate = new Map();
     for (const p of processed) {
-      if (!byDate.has(p.date)) byDate.set(p.date, { date: p.date, photoIds: [], previewUrls: [], location: null, skipped: false });
+      if (!byDate.has(p.date)) byDate.set(p.date, { date: p.date, photoIds: [], items: [], location: null, skipped: false });
       const group = byDate.get(p.date);
       group.photoIds.push(p.photoId);
-      group.previewUrls.push(p.previewUrl);
+      group.items.push({ url: p.previewUrl, mediaType: p.mediaType });
       if (!group.location && p.location) group.location = p.location;
     }
 
@@ -1129,9 +1165,10 @@
     renderBulkImportGroups();
   }
 
-  // Photos without EXIF data fall back to the file's own last-modified
-  // timestamp — usually close to capture date, and always editable below
-  // before anything is actually imported.
+  // Media without an embedded date (a photo with no EXIF, or a video whose
+  // container metadata wasn't readable) falls back to the file's own
+  // last-modified timestamp — usually close to capture date, and always
+  // editable below before anything is actually imported.
   function dateFromFileTimestamp(file) {
     if (file.lastModified) return H.todayLocalStr(new Date(file.lastModified));
     return H.todayLocalStr();
@@ -1142,7 +1179,7 @@
     wrap.innerHTML = '';
 
     if (!bulkImportGroups.length) {
-      wrap.innerHTML = emptyStateHtml('📷', 'No photos found', 'Try choosing photos again.');
+      wrap.innerHTML = emptyStateHtml('📷', 'Nothing found', 'Try choosing files again.');
       $('#bulkImportConfirmWrap').classList.add('hidden');
       return;
     }
@@ -1152,10 +1189,10 @@
       row.className = 'import-group' + (group.skipped ? ' skipped' : '');
 
       const thumbsHtml =
-        group.previewUrls
+        group.items
           .slice(0, 3)
-          .map((u) => `<img src="${u}" alt="">`)
-          .join('') + (group.previewUrls.length > 3 ? `<div class="more">+${group.previewUrls.length - 3}</div>` : '');
+          .map((item) => `<div class="photo-thumb-wrap" style="width:44px;height:44px;border-radius:8px;"><img src="${item.url}" alt="">${item.mediaType === 'video' ? '<span class="play-badge">▶</span>' : ''}</div>`)
+          .join('') + (group.items.length > 3 ? `<div class="more">+${group.items.length - 3}</div>` : '');
 
       row.innerHTML = `
         <div class="row-top">
@@ -1163,7 +1200,7 @@
           <button type="button" class="skip-btn">${group.skipped ? 'Include' : 'Skip'}</button>
         </div>
         <div class="thumbs">${thumbsHtml}</div>
-        <div style="font-size:12px; color:var(--ink-soft); margin-top:6px;">${group.photoIds.length} photo${group.photoIds.length === 1 ? '' : 's'}${group.location ? ' · 📍 has location' : ''}</div>
+        <div style="font-size:12px; color:var(--ink-soft); margin-top:6px;">${group.photoIds.length} item${group.photoIds.length === 1 ? '' : 's'}${group.location ? ' · 📍 has location' : ''}</div>
       `;
 
       row.querySelector('input[type="date"]').addEventListener('change', (e) => {
@@ -1205,33 +1242,70 @@
 
   // ================= Full-screen photo viewer =================
 
-  async function getPhotoFullUrl(photoId) {
+  async function getPhotoViewerMedia(photoId) {
     if (fullUrlCache.has(photoId)) return fullUrlCache.get(photoId);
     const rec = await Photos.get(photoId).catch(() => null);
-    const url = rec && rec.fullBlob ? objectUrlFor(rec.fullBlob) : rec && rec.thumbBlob ? objectUrlFor(rec.thumbBlob) : '';
-    fullUrlCache.set(photoId, url);
-    return url;
+    if (!rec) {
+      const empty = { url: '', mediaType: 'photo' };
+      fullUrlCache.set(photoId, empty);
+      return empty;
+    }
+    const mediaType = rec.mediaType || 'photo';
+    const blob = mediaType === 'video' ? rec.videoBlob || rec.thumbBlob : rec.fullBlob || rec.thumbBlob;
+    const result = { url: objectUrlFor(blob), mediaType };
+    fullUrlCache.set(photoId, result);
+    return result;
   }
 
-  async function showPhotoViewerImage() {
+  async function showPhotoViewerMedia() {
     const { photoIds, index } = photoViewerContext;
     const img = $('#pvImage');
+    const video = $('#pvVideo');
+
     img.style.transform = '';
     img.classList.remove('snap-back');
-    img.src = await getPhotoFullUrl(photoIds[index]);
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+
+    const { url, mediaType } = await getPhotoViewerMedia(photoIds[index]);
+    if (mediaType === 'video') {
+      img.classList.add('hidden');
+      video.classList.remove('hidden');
+      video.src = url;
+    } else {
+      video.classList.add('hidden');
+      img.classList.remove('hidden');
+      img.src = url;
+    }
+
     $('#pvCounter').textContent = photoIds.length > 1 ? `${index + 1} / ${photoIds.length}` : '';
+    $('#pvPrevBtn').disabled = index === 0;
+    $('#pvNextBtn').disabled = index === photoIds.length - 1;
+  }
+
+  function photoViewerStep(delta) {
+    const { photoIds, index } = photoViewerContext;
+    const next = index + delta;
+    if (next < 0 || next >= photoIds.length) return;
+    photoViewerContext.index = next;
+    showPhotoViewerMedia();
   }
 
   function openPhotoViewer(photoIds, startIndex) {
     if (!photoIds || !photoIds.length) return;
     photoViewerContext = { photoIds, index: Math.min(startIndex, photoIds.length - 1) };
     $('#photoViewer').classList.add('open');
-    showPhotoViewerImage();
+    showPhotoViewerMedia();
   }
 
   function closePhotoViewer() {
     $('#photoViewer').classList.remove('open');
     $('#pvImage').src = '';
+    const video = $('#pvVideo');
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
   }
 
   function wirePhotoViewerSwipe() {
@@ -1239,6 +1313,8 @@
     let startX = 0;
     let dragging = false;
 
+    // Swipe-to-navigate applies only to the image element — a video has its
+    // own native scrubber/controls that a competing swipe gesture would fight.
     img.addEventListener('touchstart', (e) => {
       if (e.touches.length !== 1) return;
       startX = e.touches[0].clientX;
@@ -1257,15 +1333,12 @@
       dragging = false;
       const dx = (e.changedTouches[0] ? e.changedTouches[0].clientX : startX) - startX;
       const threshold = 70;
-      const { photoIds, index } = photoViewerContext;
 
       img.classList.add('snap-back');
-      if (dx < -threshold && index < photoIds.length - 1) {
-        photoViewerContext.index += 1;
-        showPhotoViewerImage();
-      } else if (dx > threshold && index > 0) {
-        photoViewerContext.index -= 1;
-        showPhotoViewerImage();
+      if (dx < -threshold) {
+        photoViewerStep(1);
+      } else if (dx > threshold) {
+        photoViewerStep(-1);
       } else {
         img.style.transform = 'translateX(0px)';
       }
@@ -1586,6 +1659,8 @@
     $('#entrySheetDelete').addEventListener('click', deleteEntry);
 
     $('#pvCloseBtn').addEventListener('click', closePhotoViewer);
+    $('#pvPrevBtn').addEventListener('click', () => photoViewerStep(-1));
+    $('#pvNextBtn').addEventListener('click', () => photoViewerStep(1));
     $('#pvStage').addEventListener('click', (e) => {
       if (e.target.id === 'pvStage') closePhotoViewer();
     });
