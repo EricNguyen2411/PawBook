@@ -92,6 +92,15 @@ and reopen it.
 ## What I verified vs. what needs your eyes
 
 **Actually tested, with real code execution:**
+- Fixed a real bug reported after deploy: adding a video appeared to do
+  nothing. Root cause: the video element used to grab a thumbnail frame was
+  never attached to the page — and iOS Safari is documented to suspend
+  detached video elements to save battery, which silently prevents the
+  events this relied on from ever firing, with no error at all. Fixed by
+  attaching the element (hidden, off-screen) while it decodes. Verified the
+  element is correctly added during processing and removed afterward, on
+  both the success path and the decode-failure path (confirmed neither
+  leaves anything behind in the page).
 - Duplicate detection: confirmed a photo re-selected under a **completely
   different filename** is still correctly caught (proving it's real
   content hashing, not name matching), confirmed a duplicate picked twice

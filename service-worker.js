@@ -1,5 +1,5 @@
 // Bump this on every deploy so the browser detects a new version.
-const CACHE_VERSION = 'pawbook-v10';
+const CACHE_VERSION = 'pawbook-v11';
 
 const APP_SHELL = [
   './',

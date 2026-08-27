@@ -153,24 +153,40 @@ async function processPhoto(file) {
   }
 }
 
-// Loads a video file into an offscreen <video> element and waits for a
-// decoded frame partway into the clip (frame 0 is very often black/blank on
-// real camera footage), so it can be drawn to canvas the same way an image
-// or ImageBitmap would be.
+// Loads a video file into a <video> element and waits for a decoded frame
+// partway into the clip (frame 0 is very often black/blank on real camera
+// footage), so it can be drawn to canvas the same way an image or
+// ImageBitmap would be.
+//
+// The element is temporarily attached to the page (visually hidden, off
+// the edge of the screen) rather than left detached. iOS Safari is
+// documented to suspend video elements that aren't attached to the DOM as
+// a battery-saving measure — which silently prevents loadedmetadata/seeked
+// from ever firing, with no error at all. That exact symptom (picking a
+// video appears to do nothing) is what this works around.
 function captureVideoFrame(file) {
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
     video.preload = 'metadata';
     video.muted = true;
+    video.setAttribute('muted', '');
     video.playsInline = true;
+    video.setAttribute('playsinline', ''); // some WebKit versions want the attribute form too
+    video.style.cssText = 'position:fixed; top:0; left:-9999px; width:1px; height:1px; opacity:0;';
+    document.body.appendChild(video);
+
     const url = URL.createObjectURL(file);
     video.src = url;
 
     let settled = false;
+    const cleanup = () => {
+      URL.revokeObjectURL(url);
+      if (video.parentNode) video.parentNode.removeChild(video);
+    };
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      URL.revokeObjectURL(url);
+      cleanup();
       reject(new PhotoProcessingError('decode', new Error('timed out loading video')));
     }, VIDEO_LOAD_TIMEOUT_MS);
 
@@ -182,13 +198,17 @@ function captureVideoFrame(file) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ source: video, dims: { w: video.videoWidth, h: video.videoHeight }, url });
+      // Resolve with dims now; the caller draws from `video` synchronously
+      // before this function's own cleanup would otherwise remove it, so
+      // defer removal to the caller via the returned cleanup-less video —
+      // actual DOM removal happens in processVideo's finally block instead.
+      resolve({ source: video, dims: { w: video.videoWidth, h: video.videoHeight }, url, remove: () => cleanup() });
     };
     video.onerror = () => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      URL.revokeObjectURL(url);
+      cleanup();
       reject(new PhotoProcessingError('decode', new Error('<video> element could not decode this file')));
     };
   });
@@ -205,12 +225,12 @@ async function processVideo(file) {
     throw new PhotoProcessingError('size', new Error(`video is ${mb}MB, over the ${capMb}MB limit — try trimming it first`));
   }
 
-  const { source, dims, url } = await captureVideoFrame(file);
+  const { source, dims, remove } = await captureVideoFrame(file);
   try {
     const thumbBlob = await resizeToBlob(source, dims, THUMB_MAX_DIM, 0.7);
     return { thumbBlob, videoBlob: file, mediaType: 'video' };
   } finally {
-    URL.revokeObjectURL(url);
+    remove();
   }
 }
 
