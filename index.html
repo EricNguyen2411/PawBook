@@ -27,6 +27,7 @@
         <input type="search" id="timelineSearch" placeholder="Search captions & tags" style="flex:1;">
         <button class="btn btn-secondary" id="openBulkImportBtn" style="white-space:nowrap; padding:10px 14px;">Import</button>
       </div>
+      <button type="button" class="all-dogs-toggle hidden" id="allDogsToggle">🔍 Search all dogs</button>
       <div class="type-filter-row" id="typeFilterRow">
         <button class="filter-chip active" data-type="all">All</button>
         <button class="filter-chip" data-type="photo">Photos</button>
@@ -75,6 +76,13 @@
     <div class="field">
       <label for="dogBirthday">Birthday (optional)</label>
       <input type="date" id="dogBirthday">
+    </div>
+    <div class="field">
+      <label>Target weight range (kg, optional)</label>
+      <div style="display:flex; gap:10px;">
+        <input type="number" id="dogTargetMinKg" inputmode="decimal" step="0.1" min="0" placeholder="Min">
+        <input type="number" id="dogTargetMaxKg" inputmode="decimal" step="0.1" min="0" placeholder="Max">
+      </div>
     </div>
     <div class="field">
       <label>Photo</label>
@@ -215,6 +223,9 @@
     </div>
     <div id="recapContent"></div>
     <div class="sheet-actions">
+      <button class="btn btn-primary btn-block" id="recapShareBtn">Share this recap</button>
+    </div>
+    <div class="sheet-actions">
       <button class="btn btn-secondary btn-block sheet-close" style="margin-top:8px;">Close</button>
     </div>
   </div>
@@ -239,9 +250,33 @@
     </div>
   </div>
 
+  <!-- ===== Recently Deleted sheet ===== -->
+  <div class="sheet" id="trashSheet">
+    <div class="grabber"></div>
+    <h3>Recently Deleted</h3>
+    <p style="font-size:13px; color:var(--ink-soft); line-height:1.5; margin:0 0 14px;">
+      Deleted entries stay here for 30 days before being permanently removed,
+      in case you deleted something by accident.
+    </p>
+    <div id="trashList"></div>
+    <div class="sheet-actions">
+      <button class="btn btn-secondary btn-block sheet-close" style="margin-top:8px;">Close</button>
+    </div>
+  </div>
+
+  <!-- ===== App lock screen ===== -->
+  <div class="lock-screen" id="lockScreen">
+    <div style="font-size:40px; margin-bottom:6px;">🐾</div>
+    <h2>PawBook</h2>
+    <input type="password" id="lockPinInput" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="PIN">
+    <div class="error-msg" id="lockError"></div>
+    <button class="btn btn-primary" id="lockUnlockBtn" style="width:200px;">Unlock</button>
+  </div>
+
   <!-- ===== Full-screen photo viewer ===== -->
   <div class="photo-viewer" id="photoViewer">
     <button class="pv-close" id="pvCloseBtn" aria-label="Close">×</button>
+    <button class="pv-share" id="pvShareBtn" aria-label="Share">⤴</button>
     <button class="pv-nav pv-prev" id="pvPrevBtn" aria-label="Previous">‹</button>
     <button class="pv-nav pv-next" id="pvNextBtn" aria-label="Next">›</button>
     <div class="pv-stage" id="pvStage">

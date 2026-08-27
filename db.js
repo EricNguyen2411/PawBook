@@ -76,17 +76,20 @@ function getAll(storeName, indexName, query) {
 
 const DogsAPI = {
   async add(dog) {
+    // Spread first — same reasoning as Entries.add and Photos.add. This was
+    // the third copy of the same hand-maintained-whitelist pattern that had
+    // already caused a real bug twice; fixing it here before it does again
+    // (this change is what let targetMinKg/targetMaxKg just work below).
     const record = {
+      breed: '',
+      birthday: null,
+      coverPhotoId: null,
+      ...dog,
       id: uuid(),
-      name: dog.name,
-      breed: dog.breed || '',
-      birthday: dog.birthday || null, // 'YYYY-MM-DD' or null if unknown
-      coverPhotoId: dog.coverPhotoId || null,
       createdAt: Date.now(),
     };
     const t = await tx(['dogs'], 'readwrite');
     t.objectStore('dogs').add(record);
-    await reqToPromise(t.objectStore('dogs').get(record.id));
     return record;
   },
 
@@ -108,6 +111,13 @@ const DogsAPI = {
 };
 
 // ---- Entries (timeline: photo posts, notes, milestones) ----
+//
+// Deleting an entry is a soft delete: it's stamped with `deletedAt` rather
+// than removed outright, and every read here filters those out by default.
+// A separate "Recently Deleted" view (app.js) can list, restore, or
+// permanently purge them. This is deliberately NOT hidden inside forDog/all
+// via a hard-to-notice flag — see the dedicated trashedForDog/purge methods
+// below, which make the soft-delete lifecycle explicit at the call site.
 
 const EntriesAPI = {
   async add(entry) {
@@ -124,6 +134,7 @@ const EntriesAPI = {
       photoIds: entry.photoIds || [],
       tags: entry.tags || [],
       favorite: !!entry.favorite,
+      deletedAt: null,
       createdAt: Date.now(),
     };
     const t = await tx(['entries'], 'readwrite');
@@ -137,14 +148,38 @@ const EntriesAPI = {
     return entry;
   },
 
+  async get(id) {
+    const t = await tx(['entries'], 'readonly');
+    return reqToPromise(t.objectStore('entries').get(id));
+  },
+
   async forDog(dogId) {
     const entries = await getAll('entries', 'byDog', dogId);
-    return entries.sort((a, b) => (a.date < b.date ? 1 : -1));
+    return entries.filter((e) => !e.deletedAt).sort((a, b) => (a.date < b.date ? 1 : -1));
   },
 
   async all() {
     const entries = await getAll('entries');
-    return entries.sort((a, b) => (a.date < b.date ? 1 : -1));
+    return entries.filter((e) => !e.deletedAt).sort((a, b) => (a.date < b.date ? 1 : -1));
+  },
+
+  async trashedForDog(dogId) {
+    const entries = await getAll('entries', 'byDog', dogId);
+    return entries.filter((e) => e.deletedAt).sort((a, b) => b.deletedAt - a.deletedAt);
+  },
+
+  async softDelete(id) {
+    const entry = await this.get(id);
+    if (!entry) return null;
+    entry.deletedAt = Date.now();
+    return this.update(entry);
+  },
+
+  async restore(id) {
+    const entry = await this.get(id);
+    if (!entry) return null;
+    entry.deletedAt = null;
+    return this.update(entry);
   },
 
   async remove(id) {
@@ -170,6 +205,12 @@ const PhotosAPI = {
   async get(id) {
     const t = await tx(['photos'], 'readonly');
     return reqToPromise(t.objectStore('photos').get(id));
+  },
+
+  // Used to build a duplicate-detection index (content hashes) before a
+  // bulk import — small enough at personal scale to just fetch everything.
+  async all() {
+    return getAll('photos');
   },
 
   async remove(id) {

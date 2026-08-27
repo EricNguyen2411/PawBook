@@ -14,6 +14,7 @@
   let dogPhotoRemoved = false; // true when editing and the user cleared the existing avatar
   let timelineQuery = '';
   let timelineTypeFilter = 'all';
+  let searchAllDogs = false;
   let recapDogId = null; // which dog the open recap sheet is showing
   let bulkImportGroups = []; // [{date, photoIds: [], previewUrls: [], location, skipped}] during a bulk import review
   let editingEntryId = null; // set when the entry sheet is in "edit" mode
@@ -53,11 +54,23 @@
 
   // ================= Utilities =================
 
-  function showToast(msg) {
-    toastEl.textContent = msg;
+  function showToast(msg, action) {
+    toastEl.innerHTML = '';
+    toastEl.appendChild(document.createTextNode(msg));
+    if (action) {
+      const btn = document.createElement('button');
+      btn.className = 'toast-action';
+      btn.textContent = action.label;
+      btn.addEventListener('click', () => {
+        toastEl.classList.remove('show');
+        clearTimeout(showToast._t);
+        action.onClick();
+      });
+      toastEl.appendChild(btn);
+    }
     toastEl.classList.add('show');
     clearTimeout(showToast._t);
-    showToast._t = setTimeout(() => toastEl.classList.remove('show'), 1800);
+    showToast._t = setTimeout(() => toastEl.classList.remove('show'), action ? 4000 : 1800);
   }
 
   function openSheet(sheetEl) {
@@ -127,6 +140,7 @@
     await renderDogSwitcher();
     setTab('timeline');
     wireEvents();
+    purgeExpiredTrash();
   }
 
   function persistCurrentDog() {
@@ -181,6 +195,8 @@
       openSheet($('#dogSheet'));
     });
     dogSwitcherEl.appendChild(addChip);
+
+    $('#allDogsToggle').classList.toggle('hidden', dogs.length <= 1);
   }
 
   // ================= Render dispatch =================
@@ -210,9 +226,10 @@
 
   async function renderTimeline() {
     const content = $('#timelineContent');
-    const allEntries = await Entries.forDog(currentDogId);
+    const dogEntries = await Entries.forDog(currentDogId);
+    const searchSourceEntries = searchAllDogs ? await Entries.all() : dogEntries;
 
-    if (!allEntries.length) {
+    if (!dogEntries.length && !searchAllDogs) {
       content.innerHTML = emptyStateHtml('🐾', 'No entries yet', 'Tap the + button to add your first photo or memory.');
       return;
     }
@@ -220,8 +237,10 @@
     const today = H.todayLocalStr();
     let html = '';
 
-    // Care reminders — always based on the full, unfiltered entry list.
-    const reminders = H.upcomingCareReminders(allEntries, today, 30);
+    // Care reminders and "on this day" always stay scoped to the currently
+    // selected dog, regardless of the all-dogs search toggle — they're
+    // context for "this dog", not part of the search results themselves.
+    const reminders = H.upcomingCareReminders(dogEntries, today, 30);
     if (reminders.length) {
       const overdue = reminders.filter((r) => r.daysUntil < 0);
       const cls = overdue.length ? 'overdue' : 'soon';
@@ -244,15 +263,17 @@
       </div>`;
     }
 
-    const filtered = H.filterEntries(allEntries, { query: timelineQuery, type: timelineTypeFilter });
+    const filtered = H.filterEntries(searchSourceEntries, { query: timelineQuery, type: timelineTypeFilter });
 
-    const onThisDay = H.onThisDayEntries(allEntries, today);
-    if (onThisDay.length) {
-      const years = onThisDay.map((e) => H.parseLocalDate(e.date).getFullYear()).join(', ');
-      html += `<div class="on-this-day"><div>
-          <div class="label">On this day</div>
-          <div class="text">${onThisDay.length} ${onThisDay.length === 1 ? 'memory' : 'memories'} from ${years}</div>
-        </div></div>`;
+    if (!searchAllDogs) {
+      const onThisDay = H.onThisDayEntries(dogEntries, today);
+      if (onThisDay.length) {
+        const years = onThisDay.map((e) => H.parseLocalDate(e.date).getFullYear()).join(', ');
+        html += `<div class="on-this-day"><div>
+            <div class="label">On this day</div>
+            <div class="text">${onThisDay.length} ${onThisDay.length === 1 ? 'memory' : 'memories'} from ${years}</div>
+          </div></div>`;
+      }
     }
 
     if (!filtered.length) {
@@ -265,12 +286,13 @@
     for (const group of groups) {
       html += `<div class="month-heading">${group.label}</div>`;
       for (const entry of group.entries) {
-        html += await entryCardHtml(entry, today);
+        const dogName = searchAllDogs ? (dogs.find((d) => d.id === entry.dogId) || {}).name : null;
+        html += await entryCardHtml(entry, today, dogName);
       }
     }
 
     content.innerHTML = html;
-    allEntries.forEach((e) => entryLookupById.set(e.id, e));
+    searchSourceEntries.forEach((e) => entryLookupById.set(e.id, e));
     wireEntryCardInteractions(content);
   }
 
@@ -292,18 +314,20 @@
     return '';
   }
 
-  async function entryCardHtml(entry, today) {
+  async function entryCardHtml(entry, today, dogName) {
     const photoRecords = await Promise.all((entry.photoIds || []).map((id) => Photos.get(id).catch(() => null)));
     const validPhotos = photoRecords.filter(Boolean);
 
     let photosHtml = '';
     if (validPhotos.length) {
       const n = validPhotos.length === 1 ? 'n1' : validPhotos.length === 2 ? 'n2' : 'nmany';
+      const extraCount = validPhotos.length - 4;
       photosHtml = `<div class="entry-photos ${n}" data-photo-ids='${JSON.stringify(entry.photoIds || [])}'>${validPhotos
         .slice(0, 4)
         .map((p, i) => {
           const badge = p.mediaType === 'video' ? '<span class="play-badge">▶</span>' : '';
-          return `<div class="photo-thumb-wrap" data-index="${i}"><img src="${objectUrlFor(p.thumbBlob)}" alt="">${badge}</div>`;
+          const moreBadge = i === 3 && extraCount > 0 ? `<span class="more-badge">+${extraCount}</span>` : '';
+          return `<div class="photo-thumb-wrap" data-index="${i}"><img src="${objectUrlFor(p.thumbBlob)}" alt="">${badge}${moreBadge}</div>`;
         })
         .join('')}</div>`;
     }
@@ -334,7 +358,7 @@
 
     return `
       <div class="${cardClasses}" data-id="${entry.id}">
-        <div class="date-stamp">${H.formatDateShort(entry.date)} · ${meta.icon} ${meta.label}</div>
+        <div class="date-stamp">${H.formatDateShort(entry.date)} · ${meta.icon} ${meta.label}${dogName ? ` · 🐕 ${escapeHtml(dogName)}` : ''}</div>
         ${photosHtml}
         <div class="entry-body">
           ${entrySubtitleHtml(entry, today)}
@@ -391,6 +415,7 @@
 
   async function renderWeight() {
     const root = $('#screen-weight');
+    const dog = currentDog();
     const weights = await Weights.forDog(currentDogId);
 
     if (!weights.length) {
@@ -408,17 +433,33 @@
     const min = Math.min(...all);
     const max = Math.max(...all);
 
-    const chart = H.buildWeightChartPoints(weights, 320, 140, 24);
+    const hasTarget = dog && typeof dog.targetMinKg === 'number' && typeof dog.targetMaxKg === 'number';
+    const targetRange = hasTarget ? { min: dog.targetMinKg, max: dog.targetMaxKg } : null;
+    const chart = H.buildWeightChartPoints(weights, 320, 140, 24, targetRange);
+    const status = hasTarget ? H.weightStatus(latest.weightKg, dog.targetMinKg, dog.targetMaxKg) : null;
 
     let svg = '';
     if (chart) {
+      const bandHtml = chart.targetBand
+        ? `<rect x="24" y="${chart.targetBand.topY}" width="272" height="${Math.max(1, chart.targetBand.bottomY - chart.targetBand.topY)}" fill="var(--moss)" opacity="0.15" />`
+        : '';
       svg = `<svg viewBox="0 0 320 140">
+        ${bandHtml}
         <path class="chart-line" d="${chart.path}" />
         ${chart.points.map((p) => `<circle class="chart-dot" cx="${p.x}" cy="${p.y}" r="3.5" />`).join('')}
         <text class="chart-axis-label" x="24" y="134">${H.formatDateShort(weights[0].date)}</text>
         <text class="chart-axis-label" x="296" y="134" text-anchor="end">${H.formatDateShort(weights[weights.length - 1].date)}</text>
       </svg>`;
     }
+
+    const statusLabels = {
+      within: { text: '✓ Within target range', color: 'var(--moss)' },
+      below: { text: '↓ Below target range', color: 'var(--gold)' },
+      above: { text: '↑ Above target range', color: 'var(--rust)' },
+    };
+    const statusHtml = status
+      ? `<div style="text-align:center; font-size:13px; font-weight:600; color:${statusLabels[status].color}; margin:-8px 0 12px;">${statusLabels[status].text} (${dog.targetMinKg}–${dog.targetMaxKg} kg)</div>`
+      : '';
 
     root.innerHTML = `
       <div class="weight-summary">
@@ -432,6 +473,7 @@
           <div class="label">Range (kg)</div>
         </div>
       </div>
+      ${statusHtml}
       <div class="chart-card">${svg}</div>
       <button class="btn btn-primary btn-block" id="addWeightBtn" style="margin-bottom:16px;">+ Log weight</button>
       <div id="weightList"></div>
@@ -552,6 +594,8 @@
       $('#dogName').value = dog.name || '';
       $('#dogBreed').value = dog.breed || '';
       $('#dogBirthday').value = dog.birthday || '';
+      $('#dogTargetMinKg').value = dog.targetMinKg || '';
+      $('#dogTargetMaxKg').value = dog.targetMaxKg || '';
       pendingDogPhoto = null;
       dogPhotoRemoved = false;
       renderDogAvatarPicker(avatarUrl);
@@ -564,7 +608,9 @@
       chip.addEventListener('click', () => {
         timelineQuery = chip.dataset.tag;
         timelineTypeFilter = 'all';
+        searchAllDogs = false;
         $('#timelineSearch').value = chip.dataset.tag;
+        $('#allDogsToggle').classList.remove('active');
         $$('.filter-chip').forEach((c) => c.classList.toggle('active', c.dataset.type === 'all'));
         setTab('timeline');
       });
@@ -644,6 +690,8 @@
     $('#dogName').value = '';
     $('#dogBreed').value = '';
     $('#dogBirthday').value = '';
+    $('#dogTargetMinKg').value = '';
+    $('#dogTargetMaxKg').value = '';
     pendingDogPhoto = null;
     dogPhotoRemoved = false;
     renderDogAvatarPicker('');
@@ -708,6 +756,12 @@
     }
     const breed = $('#dogBreed').value.trim();
     const birthday = $('#dogBirthday').value || null;
+    const targetMinKg = parseFloat($('#dogTargetMinKg').value) || null;
+    const targetMaxKg = parseFloat($('#dogTargetMaxKg').value) || null;
+    if (targetMinKg && targetMaxKg && targetMinKg > targetMaxKg) {
+      showToast('Target min should be less than target max');
+      return;
+    }
 
     let coverPhotoId;
     if (pendingDogPhoto) {
@@ -722,13 +776,15 @@
       dog.name = name;
       dog.breed = breed;
       dog.birthday = birthday;
+      dog.targetMinKg = targetMinKg;
+      dog.targetMaxKg = targetMaxKg;
       if (coverPhotoId !== undefined) {
         photoUrlCache.delete(dog.coverPhotoId);
         dog.coverPhotoId = coverPhotoId;
       }
       await Dogs.update(dog);
     } else {
-      const dog = await Dogs.add({ name, breed, birthday, coverPhotoId: coverPhotoId || null });
+      const dog = await Dogs.add({ name, breed, birthday, targetMinKg, targetMaxKg, coverPhotoId: coverPhotoId || null });
       dogs.push(dog);
       currentDogId = dog.id;
       persistCurrentDog();
@@ -850,17 +906,31 @@
   }
 
   async function deleteEntry() {
-    if (!editingEntryId || !editingEntryOriginal) return;
-    if (!confirm("Delete this entry? This can't be undone.")) return;
+    if (!editingEntryId) return;
+    const id = editingEntryId;
 
-    for (const id of editingEntryOriginal.photoIds || []) await Photos.remove(id);
-    await Entries.remove(editingEntryId);
-    entryLookupById.delete(editingEntryId);
+    await Entries.softDelete(id);
+    const updated = await Entries.get(id);
+    entryLookupById.set(id, updated);
 
     closeSheet($('#entrySheet'));
-    showToast('Entry deleted');
     if (activeTab === 'timeline') renderTimeline();
     else if (activeTab === 'profile') renderProfile();
+
+    // Photos are only cleaned up when the entry is actually purged (either
+    // manually from Recently Deleted, or automatically after 30 days) —
+    // never at the moment of a soft delete, since Undo needs them intact.
+    showToast('Entry moved to Recently Deleted', {
+      label: 'Undo',
+      onClick: async () => {
+        await Entries.restore(id);
+        const restored = await Entries.get(id);
+        entryLookupById.set(id, restored);
+        showToast('Restored');
+        if (activeTab === 'timeline') renderTimeline();
+        else if (activeTab === 'profile') renderProfile();
+      },
+    });
   }
 
   function renderPhotoPicker() {
@@ -975,7 +1045,8 @@
     for (const file of files) {
       try {
         const { thumbBlob, fullBlob, videoBlob, mediaType, date, location } = await captureMedia(file);
-        pendingPhotos.push({ thumbBlob, fullBlob, videoBlob, mediaType, previewUrl: objectUrlFor(thumbBlob) });
+        const contentHash = await hashFileBytes(file).catch(() => null);
+        pendingPhotos.push({ thumbBlob, fullBlob, videoBlob, mediaType, contentHash, previewUrl: objectUrlFor(thumbBlob) });
 
         // Auto-fill the date from the file's embedded date (EXIF for
         // photos, container metadata for videos), but only if the user
@@ -1032,7 +1103,7 @@
         if (p.existingPhotoId) {
           photoIds.push(p.existingPhotoId);
         } else {
-          const rec = await Photos.add({ thumbBlob: p.thumbBlob, fullBlob: p.fullBlob, videoBlob: p.videoBlob, mediaType: p.mediaType || 'photo' });
+          const rec = await Photos.add({ thumbBlob: p.thumbBlob, fullBlob: p.fullBlob, videoBlob: p.videoBlob, mediaType: p.mediaType || 'photo', contentHash: p.contentHash || null });
           photoIds.push(rec.id);
         }
       }
@@ -1113,6 +1184,15 @@
     closeSheet($('#bulkImportSheet'));
   }
 
+  // Hashes a file's actual bytes (not name/size/date) so the same photo or
+  // video picked again — even under a different filename, or in a later
+  // bulk import session — is reliably recognized as identical content.
+  async function hashFileBytes(file) {
+    const buf = await file.arrayBuffer();
+    const digest = await window.crypto.subtle.digest('SHA-256', buf);
+    return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
   async function handleBulkPhotoSelection(fileList) {
     const rawCount = (fileList || []).length;
     const files = Array.from(fileList || []).filter(looksLikeMediaFile);
@@ -1127,17 +1207,34 @@
     const progress = $('#bulkImportProgress');
     progress.classList.remove('hidden');
 
+    // Build the existing-content index once up front, rather than per file —
+    // one query for the whole batch. Photos without a contentHash (added
+    // before this feature existed) simply can't be matched against, which
+    // is a fine, safe default: nothing gets incorrectly flagged as a dup.
+    progress.textContent = 'Checking for duplicates…';
+    const existingPhotos = await Photos.all();
+    const knownHashes = new Set(existingPhotos.map((p) => p.contentHash).filter(Boolean));
+    const seenThisBatch = new Set();
+
     // A flat list of processed media before grouping — processed one at a
     // time (not in parallel) to keep memory use bounded for large batches.
     const processed = [];
     const failures = [];
+    let duplicateCount = 0;
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       progress.textContent = `Processing ${i + 1} of ${files.length}…`;
       try {
+        const hash = await hashFileBytes(file);
+        if (knownHashes.has(hash) || seenThisBatch.has(hash)) {
+          duplicateCount++;
+          continue; // skip entirely — no point resizing/reading further for a dup
+        }
+        seenThisBatch.add(hash);
+
         const { thumbBlob, fullBlob, videoBlob, mediaType, date, location } = await captureMedia(file);
-        const rec = await Photos.add({ thumbBlob, fullBlob, videoBlob, mediaType });
+        const rec = await Photos.add({ thumbBlob, fullBlob, videoBlob, mediaType, contentHash: hash });
         const finalDate = date || dateFromFileTimestamp(file);
         processed.push({ photoId: rec.id, date: finalDate, location, mediaType, previewUrl: objectUrlFor(thumbBlob) });
       } catch (err) {
@@ -1147,9 +1244,11 @@
     }
 
     progress.classList.add('hidden');
-    if (failures.length) {
-      showToast(`${failures.length} of ${files.length} file${files.length === 1 ? '' : 's'} couldn't be read and were skipped`);
-    }
+
+    const messages = [];
+    if (duplicateCount) messages.push(`${duplicateCount} duplicate${duplicateCount === 1 ? '' : 's'} skipped`);
+    if (failures.length) messages.push(`${failures.length} couldn't be read`);
+    if (messages.length) showToast(messages.join(' · '));
 
     // Group by date.
     const byDate = new Map();
@@ -1409,6 +1508,80 @@
     `;
   }
 
+  // ================= Recently Deleted =================
+
+  const TRASH_RETENTION_DAYS = 30;
+
+  // Permanently removes any soft-deleted entry (across ALL dogs, not just
+  // the current one) that has been in the trash longer than the retention
+  // window, cleaning up its photos too. Called once at boot.
+  async function purgeExpiredTrash() {
+    const now = Date.now();
+    const allDogs = await Dogs.all();
+    for (const dog of allDogs) {
+      const trashed = await Entries.trashedForDog(dog.id);
+      for (const entry of trashed) {
+        if (H.isTrashExpired(entry.deletedAt, now, TRASH_RETENTION_DAYS)) {
+          for (const id of entry.photoIds || []) await Photos.remove(id);
+          await Entries.remove(entry.id);
+          entryLookupById.delete(entry.id);
+        }
+      }
+    }
+  }
+
+  async function openTrashSheet() {
+    await renderTrashList();
+    openSheet($('#trashSheet'));
+  }
+
+  async function renderTrashList() {
+    const wrap = $('#trashList');
+    const trashed = currentDogId ? await Entries.trashedForDog(currentDogId) : [];
+
+    if (!trashed.length) {
+      wrap.innerHTML = emptyStateHtml('🗑️', 'Nothing here', "Deleted entries for this dog will show up here for 30 days.");
+      return;
+    }
+
+    const now = Date.now();
+    wrap.innerHTML = '';
+    trashed.forEach((entry) => {
+      const daysLeft = Math.max(0, TRASH_RETENTION_DAYS - Math.floor((now - entry.deletedAt) / 86400000));
+      const meta = TYPE_META[entry.type] || TYPE_META.note;
+      const row = document.createElement('div');
+      row.className = 'trash-row';
+      row.innerHTML = `
+        <div class="info">
+          <div class="caption-preview">${meta.icon} ${escapeHtml(entry.caption || meta.label)}</div>
+          <div class="meta-line">${H.formatDateLong(entry.date)} · deleted, ${daysLeft} day${daysLeft === 1 ? '' : 's'} left</div>
+        </div>
+        <div class="actions">
+          <button type="button" class="restore-btn">Restore</button>
+          <button type="button" class="purge-btn">Delete forever</button>
+        </div>
+      `;
+      row.querySelector('.restore-btn').addEventListener('click', async () => {
+        await Entries.restore(entry.id);
+        const restored = await Entries.get(entry.id);
+        entryLookupById.set(entry.id, restored);
+        showToast('Restored');
+        renderTrashList();
+        if (activeTab === 'timeline') renderTimeline();
+        else if (activeTab === 'profile') renderProfile();
+      });
+      row.querySelector('.purge-btn').addEventListener('click', async () => {
+        if (!confirm('Permanently delete this entry? This cannot be undone.')) return;
+        for (const id of entry.photoIds || []) await Photos.remove(id);
+        await Entries.remove(entry.id);
+        entryLookupById.delete(entry.id);
+        showToast('Permanently deleted');
+        renderTrashList();
+      });
+      wrap.appendChild(row);
+    });
+  }
+
   // ================= Puppy vaccination schedule =================
 
   function openVaccineScheduleSheet(dog) {
@@ -1463,6 +1636,255 @@
     else if (activeTab === 'timeline') renderTimeline();
   }
 
+  // ================= App Lock =================
+
+  async function sha256Hex(text) {
+    const enc = new TextEncoder().encode(text);
+    const buf = await window.crypto.subtle.digest('SHA-256', enc);
+    return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  function getLockHash() {
+    return localStorage.getItem('pawbook_lock_hash') || null;
+  }
+
+  function setLockHash(hash) {
+    if (hash) localStorage.setItem('pawbook_lock_hash', hash);
+    else localStorage.removeItem('pawbook_lock_hash');
+  }
+
+  function showLockScreen() {
+    $('#lockPinInput').value = '';
+    $('#lockError').textContent = '';
+    $('#lockScreen').classList.add('open');
+  }
+
+  function hideLockScreen() {
+    $('#lockScreen').classList.remove('open');
+  }
+
+  async function attemptUnlock() {
+    const pin = $('#lockPinInput').value;
+    const hash = await sha256Hex(pin);
+    if (hash === getLockHash()) {
+      hideLockScreen();
+    } else {
+      $('#lockError').textContent = 'Incorrect PIN';
+      $('#lockPinInput').value = '';
+    }
+  }
+
+  function renderLockSettings() {
+    const wrap = $('#lockSettingsBody');
+    if (!wrap) return;
+    const hasLock = !!getLockHash();
+
+    if (!hasLock) {
+      wrap.innerHTML = `
+        <div class="field"><label>New PIN (4–6 digits)</label><input type="password" inputmode="numeric" maxlength="6" id="newPin1"></div>
+        <div class="field"><label>Confirm PIN</label><input type="password" inputmode="numeric" maxlength="6" id="newPin2"></div>
+        <button class="btn btn-primary btn-block" id="setPinBtn">Set PIN</button>
+      `;
+      $('#setPinBtn').addEventListener('click', async () => {
+        const p1 = $('#newPin1').value;
+        const p2 = $('#newPin2').value;
+        if (!/^\d{4,6}$/.test(p1)) {
+          showToast('PIN must be 4–6 digits');
+          return;
+        }
+        if (p1 !== p2) {
+          showToast('PINs do not match');
+          return;
+        }
+        setLockHash(await sha256Hex(p1));
+        showToast('PIN set');
+        renderLockSettings();
+      });
+    } else {
+      wrap.innerHTML = `
+        <p style="font-size:13px; color:var(--moss); margin-bottom:10px;">✓ PIN lock is on</p>
+        <div class="field"><label>Enter current PIN to remove it</label><input type="password" inputmode="numeric" maxlength="6" id="removePinInput"></div>
+        <button class="btn btn-secondary btn-block" id="removePinBtn">Remove PIN</button>
+      `;
+      $('#removePinBtn').addEventListener('click', async () => {
+        const entered = $('#removePinInput').value;
+        const hash = await sha256Hex(entered);
+        if (hash !== getLockHash()) {
+          showToast('Incorrect PIN');
+          return;
+        }
+        setLockHash(null);
+        showToast('PIN removed');
+        renderLockSettings();
+      });
+    }
+  }
+
+  // ================= Share as image =================
+
+  // Web Share API with files, falling back to a plain download (the same
+  // pattern as backup export) when sharing files isn't supported — covers
+  // desktop browsers and any Safari version without file-sharing support.
+  async function shareBlob(blob, filename, shareText) {
+    try {
+      const file = new File([blob], filename, { type: blob.type });
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], text: shareText });
+        return;
+      }
+    } catch (err) {
+      if (err && err.name === 'AbortError') return; // user cancelled — not an error
+      console.warn('navigator.share failed, falling back to download', err);
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    showToast('Saved — share it from your Photos/Files app');
+  }
+
+  function loadImageFromBlob(blob) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('image failed to decode for sharing'));
+      img.src = URL.createObjectURL(blob);
+    });
+  }
+
+  function truncateToWidth(ctx, text, maxWidth) {
+    if (ctx.measureText(text).width <= maxWidth) return text;
+    let t = text;
+    while (t.length > 1 && ctx.measureText(t + '…').width > maxWidth) t = t.slice(0, -1);
+    return t + '…';
+  }
+
+  // Composites a photo with a caption/date footer band, matching the app's
+  // palette, for sharing outside the app. Videos are shared as-is (no
+  // compositing — there's no straightforward way to burn a caption into
+  // video without much heavier tooling than fits this app).
+  async function buildEntryShareImage(photoId, entry) {
+    const rec = await Photos.get(photoId).catch(() => null);
+    if (!rec) return null;
+
+    if (rec.mediaType === 'video') {
+      return { blob: rec.videoBlob, filename: 'pawbook-video.mp4', shareText: entry.caption || '' };
+    }
+
+    const img = await loadImageFromBlob(rec.fullBlob || rec.thumbBlob);
+    const footerH = Math.round(img.width * 0.12);
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height + footerH;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    ctx.fillStyle = '#F6F0E4';
+    ctx.fillRect(0, img.height, img.width, footerH);
+
+    const padX = img.width * 0.05;
+    const caption = entry.caption || '';
+    const dateLine = H.formatDateLong(entry.date);
+    ctx.textBaseline = 'middle';
+    if (caption) {
+      ctx.fillStyle = '#2E2A22';
+      ctx.font = `600 ${Math.round(img.width * 0.036)}px sans-serif`;
+      ctx.fillText(truncateToWidth(ctx, caption, img.width - padX * 2), padX, img.height + footerH * 0.4);
+      ctx.fillStyle = '#6B6555';
+      ctx.font = `${Math.round(img.width * 0.026)}px sans-serif`;
+      ctx.fillText(dateLine, padX, img.height + footerH * 0.72);
+    } else {
+      ctx.fillStyle = '#2E2A22';
+      ctx.font = `600 ${Math.round(img.width * 0.032)}px sans-serif`;
+      ctx.fillText(dateLine, padX, img.height + footerH * 0.5);
+    }
+    URL.revokeObjectURL(img.src);
+
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+    return { blob, filename: 'pawbook-memory.jpg', shareText: caption };
+  }
+
+  async function shareCurrentViewerMedia() {
+    const { photoIds, index } = photoViewerContext;
+    const photoId = photoIds[index];
+    let ownerEntry = null;
+    for (const e of entryLookupById.values()) {
+      if ((e.photoIds || []).includes(photoId)) {
+        ownerEntry = e;
+        break;
+      }
+    }
+    const result = await buildEntryShareImage(photoId, ownerEntry || { caption: '', date: H.todayLocalStr() });
+    if (!result) {
+      showToast('Could not prepare that for sharing');
+      return;
+    }
+    await shareBlob(result.blob, result.filename, result.shareText);
+  }
+
+  // Renders a standalone summary card (not a screenshot of the sheet) so it
+  // looks intentional as a shared image rather than a UI crop.
+  function buildRecapShareImage(dogName, recap) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 1000;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#F6F0E4';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = '#2E2A22';
+    ctx.font = '700 44px sans-serif';
+    ctx.fillText(`${dogName}'s ${recap.year}`, 60, 100);
+    ctx.fillStyle = '#6B6555';
+    ctx.font = '400 24px sans-serif';
+    ctx.fillText('Year in Review', 60, 145);
+
+    ctx.fillStyle = '#B5432E';
+    ctx.font = '700 130px sans-serif';
+    ctx.fillText(String(recap.totalEntries), 60, 320);
+    ctx.fillStyle = '#6B6555';
+    ctx.font = '400 26px sans-serif';
+    ctx.fillText('entries logged', 60, 365);
+
+    let y = 470;
+    const line = (label, value) => {
+      ctx.fillStyle = '#2E2A22';
+      ctx.font = '600 32px sans-serif';
+      ctx.fillText(value, 60, y);
+      ctx.fillStyle = '#6B6555';
+      ctx.font = '400 20px sans-serif';
+      ctx.fillText(label, 60, y + 30);
+      y += 100;
+    };
+    line('Walks', `${recap.walks.count} walks · ${recap.walks.totalKm.toFixed(1)} km`);
+    line('Favorites', `${recap.favorites.length}`);
+    if (recap.weight.first) {
+      const change = recap.weight.change;
+      const changeText = change !== null ? ` (${change > 0 ? '+' : ''}${change.toFixed(1)})` : '';
+      line('Weight change', `${recap.weight.first.weightKg.toFixed(1)} → ${recap.weight.last.weightKg.toFixed(1)} kg${changeText}`);
+    }
+
+    ctx.fillStyle = '#B8AF9C';
+    ctx.font = '400 18px sans-serif';
+    ctx.fillText('🐾 Made with PawBook', 60, canvas.height - 40);
+
+    return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  }
+
+  async function shareCurrentRecap() {
+    const dog = dogs.find((d) => d.id === recapDogId);
+    const year = Number($('#recapYearSelect').value);
+    const entries = await Entries.forDog(recapDogId);
+    const weights = await Weights.forDog(recapDogId);
+    const recap = H.buildYearRecap(entries, weights, year);
+    const dogName = dog ? dog.name : 'My dog';
+    const blob = await buildRecapShareImage(dogName, recap);
+    await shareBlob(blob, `pawbook-recap-${year}.png`, `${dogName}'s ${year} in review`);
+  }
+
   // ================= Theme =================
 
   function resolveTheme(mode) {
@@ -1498,6 +1920,16 @@
         </div>
       </div>
       <div class="backup-card">
+        <h3>Recently Deleted</h3>
+        <p>Deleted entries are kept for 30 days before being permanently removed.</p>
+        <button class="btn btn-secondary btn-block" id="openTrashBtn">View Recently Deleted</button>
+      </div>
+      <div class="backup-card">
+        <h3>App Lock</h3>
+        <p>Adds a PIN prompt when opening PawBook. This is a basic privacy deterrent for casual snooping — not encryption. Your data isn't otherwise protected if someone accesses this device's storage directly.</p>
+        <div id="lockSettingsBody"></div>
+      </div>
+      <div class="backup-card">
         <h3>Export backup</h3>
         <p>Saves everything — every dog, entry, photo, and weigh-in — to a single file you keep yourself (Files app, iCloud Drive, email to yourself, wherever). Since PawBook stores data only on this device, this is the only way it survives a lost or replaced phone.</p>
         <button class="btn btn-primary btn-block" id="exportBtn">Export backup</button>
@@ -1511,6 +1943,9 @@
         <div class="backup-status" id="importStatus"></div>
       </div>
     `;
+
+    $('#openTrashBtn').addEventListener('click', openTrashSheet);
+    renderLockSettings();
 
     $$('#themeToggle button').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -1650,6 +2085,12 @@
       });
     });
 
+    $('#allDogsToggle').addEventListener('click', () => {
+      searchAllDogs = !searchAllDogs;
+      $('#allDogsToggle').classList.toggle('active', searchAllDogs);
+      if (activeTab === 'timeline') renderTimeline();
+    });
+
     $('#recapYearSelect').addEventListener('change', async (e) => {
       const entries = await Entries.forDog(recapDogId);
       const weights = await Weights.forDog(recapDogId);
@@ -1659,6 +2100,7 @@
     $('#entrySheetDelete').addEventListener('click', deleteEntry);
 
     $('#pvCloseBtn').addEventListener('click', closePhotoViewer);
+    $('#pvShareBtn').addEventListener('click', shareCurrentViewerMedia);
     $('#pvPrevBtn').addEventListener('click', () => photoViewerStep(-1));
     $('#pvNextBtn').addEventListener('click', () => photoViewerStep(1));
     $('#pvStage').addEventListener('click', (e) => {
@@ -1667,6 +2109,7 @@
     wirePhotoViewerSwipe();
 
     $('#confirmVaccineScheduleBtn').addEventListener('click', confirmVaccineSchedule);
+    $('#recapShareBtn').addEventListener('click', shareCurrentRecap);
   }
 
   // ================= Theme boot =================
@@ -1677,6 +2120,22 @@
       if (getThemePreference() === 'system') applyTheme('system');
     });
   }
+
+  // ================= App Lock boot =================
+  // Shown immediately (before boot()'s data loads) if a PIN is set, and
+  // again any time the app returns to the foreground — an opaque overlay,
+  // so nothing underneath is visible until unlocked either way.
+
+  if (getLockHash()) showLockScreen();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && getLockHash()) showLockScreen();
+  });
+  document.addEventListener('DOMContentLoaded', () => {
+    $('#lockUnlockBtn').addEventListener('click', attemptUnlock);
+    $('#lockPinInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') attemptUnlock();
+    });
+  });
 
   // ================= Service worker =================
 

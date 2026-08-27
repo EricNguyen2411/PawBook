@@ -42,10 +42,13 @@ async function exportBackup() {
   for (const id of photoIds) {
     const rec = await Photos.get(id);
     if (!rec) continue;
+    // Spread first, same reasoning as every other fix of this pattern in
+    // this app: a hand-picked field list here would silently drop anything
+    // added later (this is exactly what would have happened to contentHash
+    // otherwise). Blob fields need explicit base64 encoding on top since
+    // JSON can't hold binary data directly.
     photos.push({
-      id: rec.id,
-      createdAt: rec.createdAt,
-      mediaType: rec.mediaType || 'photo',
+      ...rec,
       thumbBlob: rec.thumbBlob ? await blobToBase64(rec.thumbBlob) : null,
       fullBlob: rec.fullBlob ? await blobToBase64(rec.fullBlob) : null,
       videoBlob: rec.videoBlob ? await blobToBase64(rec.videoBlob) : null,
@@ -98,7 +101,7 @@ async function restoreBackup(payload) {
     const thumbBlob = rec.thumbBlob ? base64ToBlob(rec.thumbBlob) : null;
     const fullBlob = rec.fullBlob ? base64ToBlob(rec.fullBlob) : null;
     const videoBlob = rec.videoBlob ? base64ToBlob(rec.videoBlob) : null;
-    await Photos.putRaw({ id: rec.id, thumbBlob, fullBlob, videoBlob, mediaType: rec.mediaType || 'photo', createdAt: rec.createdAt });
+    await Photos.putRaw({ ...rec, thumbBlob, fullBlob, videoBlob });
   }
 
   for (const dog of payload.dogs || []) {

@@ -5,61 +5,74 @@ installs to your phone's home screen and works fully offline.
 
 ## What it does
 
-- **Timeline** — log photos, videos, notes, milestones, walks, vet visits,
-  or vaccinations. Grouped by month, searchable, filterable by type, with
-  an "On this day" callout for entries from past years.
-- **Videos** — add a video the same way as a photo. PawBook generates a
-  thumbnail from a frame partway into the clip, shows a ▶ badge on it in
-  the timeline and picker, and plays it back with native controls in the
-  full-screen viewer. Videos over 200MB aren't accepted (trim first) — this
-  protects the app's storage and backups, not a codec limitation.
-- **Edit & delete entries** — tap any entry to edit it (date, caption, tags,
-  photos/videos, type-specific details) or delete it entirely.
-- **Full-screen viewer** — tap a photo or video to see it full-size; swipe
-  between photos in the same entry (videos use their own native controls
-  instead, plus ‹ › buttons that work for both).
-- **Auto date & location from photos, auto date from videos** — adding a
-  photo reads its embedded EXIF date (and GPS location, if present) and
-  fills in the entry's date automatically. Adding a video reads its
-  container metadata (a completely different format from photo EXIF, but
-  serves the same purpose) for its own capture date. Either way, once you
-  edit the date yourself, it won't be overwritten.
-- **Bulk import** — tap Import on the Timeline, pick a big batch of photos
-  *and videos* at once, and PawBook reads each one's real date and groups
-  everything into one entry per day, with a review step (adjustable dates,
-  skippable days) before anything is saved.
-- **Tag browser**, **stats dashboard**, **care reminders**, **puppy
-  vaccination schedule suggestions**, **weight tracking**, **year in
-  review**, **dark mode**, and **backup/restore** — see previous notes;
-  all still present and unaffected by this update.
-- Supports multiple dogs, switchable from the top bar.
-- Installable as a home-screen app (PWA), fully usable offline.
+- **Timeline** — photos, videos, notes, milestones, walks, vet visits, or
+  vaccinations. Grouped by month, searchable, filterable by type, with an
+  "On this day" callout.
+- **Search across all dogs** — a toggle appears once you have 2+ dogs,
+  switching search from "this dog" to everyone at once, with a dog-name
+  badge on each result so you can tell them apart.
+- **Edit & delete entries** — tap any entry to edit it, or delete it.
+  Deleting is now **undoable**: it moves to Recently Deleted (in the Backup
+  tab) for 30 days, with an "Undo" button right on the confirmation toast.
+- **Full-screen viewer** — tap a photo or video to see it full-size, swipe
+  between items, share any of them straight from the viewer.
+- **Share a memory or a year recap** — a share button in the photo viewer
+  composites the photo with its caption and date into a single image (or
+  shares a video as-is); a share button on the Year in Review sheet
+  generates a standalone summary card. Both use your device's native share
+  sheet where available, or save the image for you to share manually.
+- **Weight tracking with goals** — log weigh-ins, see a trend chart, and
+  optionally set a target weight range per dog — the chart shades the
+  target band and shows whether the latest weight is within, above, or
+  below it.
+- **App Lock** — an optional PIN (in the Backup tab), hashed and never
+  stored in plaintext, shown on launch and whenever you return to the app.
+  This is a basic privacy deterrent, not encryption — see below.
+- **Bulk import with duplicate detection** — pick a big batch of photos and
+  videos at once; PawBook hashes each file's actual content (not its name)
+  and automatically skips anything you've already imported — even under a
+  different filename — both against your existing library and duplicates
+  within the same batch.
+- **Auto date & location from photos, auto date from videos**; **tag
+  browser**; **stats dashboard**; **care reminders**; **puppy vaccination
+  schedule suggestions**; **year in review**; **dark mode**;
+  **backup/restore** — all still present from earlier rounds, unaffected by
+  this update (re-verified below).
+- Supports multiple dogs, switchable from the top bar. Installable as a
+  home-screen app (PWA), fully usable offline.
 
-## About video dates specifically
+## About App Lock
 
-Photos carry their capture date in a format called EXIF; videos use a
-completely different one (inside the MP4/MOV file's own container
-structure, in a part called the `moov`/`mvhd` box). PawBook reads this
-directly — no library, on-device only — but only from a bounded portion
-near the start of the file, rather than loading the whole video into memory
-just to find a few dozen bytes of metadata. This covers the common case
-(metadata placed early in the file) but not every possible video encoding.
-If a video's date can't be read this way, PawBook falls back to the video
-file's own last-modified timestamp — same fallback already used for photos
-with no EXIF — and the date is always editable before you save either way.
+This adds a PIN prompt, hashed with SHA-256 before it's stored (never in
+plaintext) — but it is **not encryption**. Your dogs' data in IndexedDB is
+not otherwise protected if someone has direct access to this device's app
+storage; App Lock is meant to stop a casual glance at your unlocked phone
+from landing on your timeline, not to withstand real forensic access.
+Losing your PIN with no way to recover it isn't a risk here, since there's
+nothing to "recover" — data isn't encrypted with it, so if you forget it,
+removing and re-setting it in the Backup tab (once you're back in — or by
+clearing this site's data, which also clears everything else) is the reset
+path. Choose a PIN you'll actually remember.
+
+## About Recently Deleted
+
+Deleting an entry now moves it to a 30-day holding area instead of removing
+it immediately — restore it anytime from Backup → Recently Deleted, or
+delete it permanently right away if you're sure. After 30 days it's cleaned
+up automatically (photos/videos included) the next time you open the app.
 
 ## How it stores your data
 
 Everything lives **locally on your phone**, in the browser's IndexedDB — no
-server, no account, nothing leaves your device unless you tap Export.
-Photos are stored as a small thumbnail plus a capped-resolution full
-version. Videos are stored as-is (no client-side compression — that would
-need much heavier tooling than fits this app's offline-first,
-dependency-free approach), plus a small poster-frame thumbnail for grids.
+server, no account, nothing leaves your device unless you tap Export or
+Share. Photos are stored as a thumbnail plus a capped-resolution full
+version; videos are stored as-is (up to 200MB) plus a small poster
+thumbnail.
 
-**Videos take up meaningfully more space than photos.** Back up regularly,
-especially after adding video-heavy entries — the Backup tab handles this
-in one tap, and video is included in both export and restore.
+**Back up regularly** — especially after a big bulk import or adding
+videos. The Backup tab handles this in one tap, and everything (including
+video, target weights, and soft-deleted-but-not-yet-purged entries staying
+as active data until purged) round-trips through export/restore.
 
 ## Getting it onto your phone
 
@@ -68,66 +81,87 @@ in one tap, and video is included in both export and restore.
    `exif.js`, `video-meta.js`, `backup.js`, `manifest.json`,
    `service-worker.js`, and the `icons/` folder).
 2. In the repo's Settings → Pages, enable Pages from the main branch.
-3. Open the resulting URL on your iPhone in **Safari** (not Chrome — "Add
-   to Home Screen" needs Safari for a proper standalone install on iOS).
+3. Open the resulting URL on your iPhone in **Safari** (not Chrome).
 4. Tap the Share icon → **Add to Home Screen**.
 5. Open it from the home screen icon from now on.
 
-If you already installed an earlier version: replace the files in your
-host, then **fully close** every open instance of the app (not just
-background it) and reopen it.
+If you already installed an earlier version: replace the files, then
+**fully close** every open instance of the app (not just background it)
+and reopen it.
 
 ## What I verified vs. what needs your eyes
 
 **Actually tested, with real code execution:**
-- The video date parser, written from scratch (no library), tested against
-  **real MP4 and MOV files generated with ffmpeg** with known creation
-  dates set — confirmed byte-exact date extraction for both formats, plus
-  defensive handling of garbage input, truncated data, and metadata that
-  sits beyond the bounded prefix this reads (falls back cleanly rather than
-  reading the whole file or crashing).
-- The video size cap and its error message.
-- The exact same design flaw I'd already found and fixed once for timeline
-  entries (a hand-maintained field whitelist silently dropping new fields)
-  was still present in the photo/video storage layer — found it before it
-  could bite, and fixed it the same way.
-- A full simulated-browser run through the real app code: added a video
-  entry and confirmed its date auto-filled from real, ffmpeg-generated
-  video metadata; confirmed the play badge appears in both the picker and
-  the timeline; confirmed the full-screen viewer correctly shows a
-  `<video>` element (not an image) for a video entry; confirmed editing an
-  entry preserves its video; confirmed bulk import correctly groups a mix
-  of photos and videos by each file's own real date; and confirmed the
-  video's mediaType and blob presence survive a full backup export.
-- The full backup/restore round trip for video specifically — export, wipe
-  the database, restore — verified against the real MP4 bytes, confirming
-  they come back **byte-for-byte identical**, the same guarantee already
-  established for photos. (One test run hit a compatibility quirk between
-  two of my *testing tools* — not the app — which I isolated and confirmed
-  before re-running the check in a way that avoided it; noting this in the
-  interest of being precise about what was and wasn't actually verified.)
-- Re-ran the full existing regression suite (plain photo entries, care
-  reminders, stats dashboard) to confirm none of this broke anything
-  already working.
+- Duplicate detection: confirmed a photo re-selected under a **completely
+  different filename** is still correctly caught (proving it's real
+  content hashing, not name matching), confirmed a duplicate picked twice
+  within the *same* bulk selection is caught too, confirmed genuinely
+  different photos are never falsely flagged, and confirmed the final
+  stored-photo and entry counts are exactly right afterward — no phantom
+  entries, no duplicate storage.
+- Found the same field-whitelist bug **a fourth time**, this time in
+  `backup.js`'s export/restore — it would have silently dropped
+  `contentHash` (and anything else added later) on every backup. Fixed the
+  same way as the previous three times, and re-verified the full
+  export → wipe → restore round trip still preserves everything correctly.
+- Every new calculation (weight-target chart scaling — including when the
+  target range falls entirely outside the actual weight data, tag counting,
+  trash-expiry boundaries) unit tested against hand-computed values.
+- Found and fixed **the same design flaw for a third time**: `Dogs.add` had
+  the same hand-maintained field whitelist that had already caused real
+  bugs twice before in this build (entries, then photos). Fixed the same
+  way, before it could bite again — this is what let the weight-target
+  fields "just work."
+- The full soft-delete lifecycle (delete → undo from the toast → delete
+  again → restore from Recently Deleted → permanently delete) run through
+  the real app code end to end.
+- App Lock's actual hash-and-compare logic: confirmed the stored value is a
+  64-character SHA-256 hex hash (never the PIN itself), confirmed a wrong
+  PIN is rejected with an error, confirmed a correct PIN unlocks, and
+  confirmed the lock reappears on returning to the app.
+- Cross-dog search with two real dogs and entries under each: confirmed
+  single-dog search stays scoped correctly, confirmed the all-dogs toggle
+  finds entries from both, and confirmed the dog-name badge appears
+  correctly on each result.
+- The share feature's image generation was rendered with a **real canvas
+  library** (not a stub) and the actual output images were visually
+  inspected — including catching and fixing a real sizing bug where a
+  normal-length caption ("Beach day at Bondi with the whole crew") was
+  being truncated unnecessarily; verified against several realistic caption
+  lengths after the fix. The recap-card and video-share paths were also
+  confirmed end-to-end through the real app code, including the fallback
+  to a plain download when the Web Share API isn't available.
+- One test run for photo-sharing specifically hit the same jsdom
+  Blob/IndexedDB testing-tool quirk documented earlier in this build (not
+  an app bug) — isolated it again, confirmed it was the same known cause,
+  and separately verified the sharing logic itself against a real Blob to
+  close the loop.
+- Re-ran the full existing regression suite (care reminders, stats
+  dashboard, weight screen, backup tab) to confirm none of this broke
+  anything already working.
 
 **Not tested — no real browser/phone here, so please check on your device:**
-- Actual video recording/picking and playback on a real iPhone — the logic
-  is tested, but real camera files, real Safari video decoding, and real
-  touch interaction with native video controls only show up on a real
-  device.
-- Whether your specific videos' metadata falls within the portion of the
-  file this reads — if a video's date doesn't auto-fill, it'll fall back to
-  the file's last-modified date, which you can just edit.
+- The actual native share sheet UI and how it looks sharing to Messages/
+  Photos/etc.
+- App Lock's real-world feel — whether re-locking every single time you
+  background the app (vs. a grace period) feels right for how you use it.
+- The visual polish of the generated share-card images at real photo sizes
+  on an actual screen.
 
 ## Known simplifications
 
+- Duplicate detection matches exact byte-for-byte content — a photo that's
+  been edited, re-compressed, or re-saved by another app (even slightly)
+  will have different bytes and won't be caught as a duplicate. It also
+  only works going forward: photos and videos already in your library from
+  before this feature don't have a content hash recorded, so duplicates of
+  *those specific* existing items won't be caught (anything newly added
+  will be, including against each other).
+- App Lock is a deterrent, not encryption (see above).
 - No push notifications for care reminders — only shown when you open the
   app.
-- Videos aren't compressed or transcoded — stored as picked, up to 200MB.
-- Video date reading only checks a bounded portion of large files, not the
-  entire file.
-- Weight input is kg-only; lb shown as a converted reference.
-- Search/filter and the tag browser are per-dog, not across all dogs.
-- Bulk import groups strictly by calendar day.
+- Videos aren't compressed; stored as picked, up to 200MB.
 - The puppy vaccination schedule is a generic template, not veterinary
-  advice — always meant to be adjusted against your actual vet's plan.
+  advice.
+- Weight input is kg-only; lb shown as a converted reference.
+- Bulk import groups strictly by calendar day.

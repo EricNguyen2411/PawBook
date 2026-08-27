@@ -97,12 +97,20 @@ function lbToKg(lb) {
 // Build normalized SVG points + a polyline path for a weight chart.
 // weights: [{date, weightKg}] sorted ascending by date.
 // Returns null if fewer than 1 point.
-function buildWeightChartPoints(weights, width, height, padding = 24) {
+function buildWeightChartPoints(weights, width, height, padding = 24, targetRange = null) {
   if (!weights || weights.length === 0) return null;
 
   const values = weights.map((w) => w.weightKg);
   let min = Math.min(...values);
   let max = Math.max(...values);
+
+  // Widen the scale to fit a target range too, so the shaded band drawn
+  // from it is never clipped even if the dog's actual weights sit outside it.
+  if (targetRange) {
+    if (typeof targetRange.min === 'number') min = Math.min(min, targetRange.min);
+    if (typeof targetRange.max === 'number') max = Math.max(max, targetRange.max);
+  }
+
   if (min === max) {
     // Flat line: pad the range so it doesn't collapse to a single height.
     min -= 1;
@@ -113,16 +121,40 @@ function buildWeightChartPoints(weights, width, height, padding = 24) {
   const innerH = height - padding * 2;
   const n = weights.length;
 
+  const toY = (weightKg) => {
+    const t = (weightKg - min) / (max - min);
+    return padding + innerH * (1 - t);
+  };
+
   const points = weights.map((w, i) => {
     const x = n === 1 ? width / 2 : padding + (innerW * i) / (n - 1);
-    const t = (w.weightKg - min) / (max - min);
-    const y = padding + innerH * (1 - t);
-    return { x, y, date: w.date, weightKg: w.weightKg };
+    return { x, y: toY(w.weightKg), date: w.date, weightKg: w.weightKg };
   });
 
   const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
 
-  return { points, path, min, max };
+  let targetBand = null;
+  if (targetRange && typeof targetRange.min === 'number' && typeof targetRange.max === 'number') {
+    targetBand = { topY: toY(targetRange.max), bottomY: toY(targetRange.min) };
+  }
+
+  return { points, path, min, max, targetBand };
+}
+
+// Where the latest weight sits relative to a target range, or null if
+// either isn't known/set yet.
+function weightStatus(weightKg, targetMinKg, targetMaxKg) {
+  if (typeof weightKg !== 'number' || typeof targetMinKg !== 'number' || typeof targetMaxKg !== 'number') return null;
+  if (weightKg < targetMinKg) return 'below';
+  if (weightKg > targetMaxKg) return 'above';
+  return 'within';
+}
+
+// Whether a soft-deleted entry has sat in the trash long enough to be
+// permanently purged.
+function isTrashExpired(deletedAt, nowMs, retentionDays = 30) {
+  if (!deletedAt) return false;
+  return nowMs - deletedAt > retentionDays * 24 * 60 * 60 * 1000;
 }
 
 // Whole days from todayStr to dateStr. Positive = future, negative = past.
@@ -305,6 +337,8 @@ const api = {
   entriesPerMonth,
   longestStreak,
   puppyVaccinationSchedule,
+  weightStatus,
+  isTrashExpired,
 };
 
 if (typeof module !== 'undefined' && module.exports) {
